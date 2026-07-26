@@ -16,10 +16,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::list_projects,
-            commands::open_project,
-            commands::list_containers,
-            commands::open_item,
             commands::pick_folder,
             commands::read_dir,
             commands::read_file,

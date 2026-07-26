@@ -2,16 +2,38 @@ export type DragPayload =
   | { kind: "tab"; data: string }
   | { kind: "file"; data: string };
 
-let currentDrag: DragPayload | null = null;
+export interface DragState {
+  setDrag(payload: DragPayload): void;
+  clearDrag(): void;
+  getDrag(): DragPayload | null;
+}
+
+export function createDragState(): DragState {
+  let currentDrag: DragPayload | null = null;
+
+  return {
+    setDrag(payload: DragPayload) {
+      currentDrag = payload;
+    },
+    clearDrag() {
+      currentDrag = null;
+    },
+    getDrag() {
+      return currentDrag;
+    },
+  };
+}
+
+const defaultDragState = createDragState();
 
 export function setDrag(payload: DragPayload) {
-  currentDrag = payload;
+  defaultDragState.setDrag(payload);
 }
 
 export function clearDrag() {
-  currentDrag = null;
+  defaultDragState.clearDrag();
 }
 
 export function getDrag(): DragPayload | null {
-  return currentDrag;
+  return defaultDragState.getDrag();
 }

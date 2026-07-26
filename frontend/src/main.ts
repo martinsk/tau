@@ -15,6 +15,19 @@ import {
 import type { TabInfo } from "./components/Tabs.js";
 import type { DropZone } from "./components/PaneDropOverlay.js";
 import { listen } from "@tauri-apps/api/event";
+import {
+  findPane,
+  firstEditorPane,
+  pruneEmptyPanes,
+  replacePane,
+  containsPane,
+  splitPane,
+  moveTabToPane,
+  closeTab,
+  activePane,
+} from "./editorTree.js";
+import { createTerminal, closeTerminal, switchTerminal } from "./terminalState.js";
+import { createLocalLayoutStorage, type LayoutStorage } from "./layoutStorage.js";
 
 interface AppState {
   rootPath: string | null;
@@ -40,6 +53,7 @@ const state: AppState = {
 };
 
 let layout: LayoutAPI | null = null;
+const layoutStorage: LayoutStorage = createLocalLayoutStorage();
 let paneCounter = 1;
 let terminalCounter = 0;
 
@@ -53,58 +67,23 @@ function newTerminalId(): string {
   return `terminal-${terminalCounter}`;
 }
 
-function layoutKey(rootPath: string): string {
-  return `tau-layout:${rootPath}`;
-}
-
 function saveLayout() {
   if (!state.rootPath) return;
-  const data = {
-    editorRoot: persistPane(state.editorRoot),
+  layoutStorage.save(state.rootPath, {
+    editorRoot: state.editorRoot,
     activePaneId: state.activePaneId,
     bottomPanelVisible: state.bottomPanelVisible,
     terminals: state.terminals,
     activeTerminalId: state.activeTerminalId,
-  };
-  localStorage.setItem(layoutKey(state.rootPath), JSON.stringify(data));
+  });
 }
 
-function loadLayout(rootPath: string): {
-  editorRoot: PaneNode;
-  activePaneId: string;
-  bottomPanelVisible: boolean;
-  terminals: TerminalInfo[];
-  activeTerminalId: string | null;
-} | null {
-  const raw = localStorage.getItem(layoutKey(rootPath));
+function loadLayout(rootPath: string) {
+  const raw = layoutStorage.load(rootPath);
   if (!raw) return null;
-  try {
-    const data = JSON.parse(raw);
-    return {
-      editorRoot: hydratePane(data.editorRoot),
-      activePaneId: data.activePaneId ?? "pane-1",
-      bottomPanelVisible: data.bottomPanelVisible ?? false,
-      terminals: Array.isArray(data.terminals) ? data.terminals : [],
-      activeTerminalId: data.activeTerminalId ?? null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function persistPane(root: PaneNode): unknown {
-  if (root.type === "editor") {
-    return {
-      type: "editor",
-      id: root.id,
-      tabs: root.tabs,
-      activeTabPath: root.activeTabPath,
-    };
-  }
   return {
-    type: "split",
-    direction: root.direction,
-    children: root.children.map(persistPane),
+    ...raw,
+    editorRoot: hydratePane(raw.editorRoot),
   };
 }
 
@@ -189,69 +168,14 @@ async function handleOpenFolder() {
   updateLayout();
 }
 
-function activePane(): EditorPane {
-  const pane = findPane(state.editorRoot, state.activePaneId);
-  if (!pane) {
-    const first = firstEditorPane(state.editorRoot);
-    if (first) {
-      state.activePaneId = first.id;
-      return first;
-    }
-    return state.editorRoot as EditorPane;
-  }
-  return pane;
-}
-
-function firstEditorPane(root: PaneNode): EditorPane | null {
-  if (root.type === "editor") return root;
-  for (const child of root.children) {
-    const found = firstEditorPane(child);
-    if (found) return found;
-  }
-  return null;
-}
-
-function pruneEmptyPanes(
-  root: PaneNode,
-  activeId: string
-): { root: PaneNode; activeId: string } {
-  const pruned = pruneNode(root, true);
-  const newRoot: PaneNode =
-    pruned ?? {
-      type: "editor",
-      id: "pane-1",
-      tabs: [],
-      activeTabPath: null,
-    };
-  const activeExists = findPane(newRoot, activeId) !== null;
-  if (!activeExists) {
-    const first = firstEditorPane(newRoot);
-    if (first) activeId = first.id;
-  }
-  return { root: newRoot, activeId };
-}
-
-function pruneNode(node: PaneNode, isRoot: boolean): PaneNode | null {
-  if (node.type === "editor") {
-    if (node.tabs.length === 0 && !isRoot) return null;
-    return node;
-  }
-  const children: PaneNode[] = [];
-  for (const child of node.children) {
-    const pruned = pruneNode(child, false);
-    if (pruned) children.push(pruned);
-  }
-  if (children.length === 0) {
-    return isRoot
-      ? { type: "editor", id: "pane-1", tabs: [], activeTabPath: null }
-      : null;
-  }
-  if (children.length === 1) return children[0];
-  return { type: "split", direction: node.direction, children };
+function getActivePane(): EditorPane {
+  const result = activePane(state.editorRoot, state.activePaneId);
+  state.activePaneId = result.activePaneId;
+  return result.pane;
 }
 
 async function handleFileClick(path: string, name: string) {
-  const pane = activePane();
+  const pane = getActivePane();
   const existing = pane.tabs.find((t) => t.path === path);
   if (existing) {
     pane.activeTabPath = path;
@@ -279,15 +203,9 @@ function handleTabClick(paneId: string, path: string) {
 }
 
 function handleTabClose(paneId: string, path: string) {
-  const pane = findPane(state.editorRoot, paneId);
-  if (!pane) return;
-  pane.tabs = pane.tabs.filter((t) => t.path !== path);
-  if (pane.activeTabPath === path) {
-    pane.activeTabPath = pane.tabs[pane.tabs.length - 1]?.path ?? null;
-  }
-  const pruned = pruneEmptyPanes(state.editorRoot, state.activePaneId);
-  state.editorRoot = pruned.root;
-  state.activePaneId = pruned.activeId;
+  const result = closeTab(state.editorRoot, paneId, path, state.activePaneId);
+  state.editorRoot = result.root;
+  state.activePaneId = result.activePaneId;
   updateLayout();
 }
 
@@ -307,23 +225,7 @@ function handleSplit(
     activeTabPath: activeTab?.path ?? null,
   };
 
-  const isNewPaneFirst = side === "left" || side === "top";
-
-  state.editorRoot = replacePane(
-    state.editorRoot,
-    paneId,
-    direction === "row"
-      ? {
-          type: "split",
-          direction: "row",
-          children: isNewPaneFirst ? [newPane, pane] : [pane, newPane],
-        }
-      : {
-          type: "split",
-          direction: "column",
-          children: isNewPaneFirst ? [newPane, pane] : [pane, newPane],
-        }
-  );
+  state.editorRoot = splitPane(state.editorRoot, paneId, direction, newPane, side);
   state.activePaneId = newPane.id;
   updateLayout();
 }
@@ -364,7 +266,6 @@ function handleSplitDrop(
   }
 
   const dir = direction === "left" || direction === "right" ? "row" : "column";
-  const isNewPaneFirst = direction === "left" || direction === "top";
   const newPane: EditorPane = {
     type: "editor",
     id: newPaneId(),
@@ -372,15 +273,11 @@ function handleSplitDrop(
     activeTabPath: tab.path,
   };
 
-  state.editorRoot = replacePane(state.editorRoot, targetPaneId, {
-    type: "split",
-    direction: dir,
-    children: isNewPaneFirst ? [newPane, targetPane] : [targetPane, newPane],
-  });
+  state.editorRoot = splitPane(state.editorRoot, targetPaneId, dir, newPane, direction);
   state.activePaneId = newPane.id;
   const pruned = pruneEmptyPanes(state.editorRoot, state.activePaneId);
   state.editorRoot = pruned.root;
-  state.activePaneId = pruned.activeId;
+  state.activePaneId = pruned.activePaneId;
   updateLayout();
 }
 
@@ -418,10 +315,6 @@ function handleTabDrop(targetPaneId: string, tabJson: string) {
   const sourcePaneId = dropped.paneId;
   if (sourcePaneId === targetPaneId) return;
 
-  const sourcePane = sourcePaneId ? findPane(state.editorRoot, sourcePaneId) : null;
-  const targetPane = findPane(state.editorRoot, targetPaneId);
-  if (!targetPane) return;
-
   const tab: TabInfo = {
     path: dropped.path,
     name: dropped.name,
@@ -429,21 +322,11 @@ function handleTabDrop(targetPaneId: string, tabJson: string) {
     dirty: dropped.dirty,
   };
 
-  if (sourcePane) {
-    sourcePane.tabs = sourcePane.tabs.filter((t) => t.path !== tab.path);
-    if (sourcePane.activeTabPath === tab.path) {
-      sourcePane.activeTabPath = sourcePane.tabs[sourcePane.tabs.length - 1]?.path ?? null;
-    }
-  }
-
-  if (!targetPane.tabs.some((t) => t.path === tab.path)) {
-    targetPane.tabs.push(tab);
-  }
-  targetPane.activeTabPath = tab.path;
+  state.editorRoot = moveTabToPane(state.editorRoot, sourcePaneId, targetPaneId, tab);
   state.activePaneId = targetPaneId;
   const pruned = pruneEmptyPanes(state.editorRoot, state.activePaneId);
   state.editorRoot = pruned.root;
-  state.activePaneId = pruned.activeId;
+  state.activePaneId = pruned.activePaneId;
   updateLayout();
 }
 
@@ -461,33 +344,51 @@ function handleToggleTerminal() {
 }
 
 function handleNewTerminal() {
-  const cwd = state.rootPath ?? "/";
   const id = newTerminalId();
-  state.terminals.push({
+  const name = `Terminal ${state.terminals.length + 1}`;
+  const cwd = state.rootPath ?? "/";
+  const next = createTerminal(
+    {
+      terminals: state.terminals,
+      activeTerminalId: state.activeTerminalId,
+      bottomPanelVisible: state.bottomPanelVisible,
+    },
     id,
-    name: `Terminal ${state.terminals.length + 1}`,
-    cwd,
-  });
-  state.activeTerminalId = id;
-  state.bottomPanelVisible = true;
+    name,
+    cwd
+  );
+  state.terminals = next.terminals;
+  state.activeTerminalId = next.activeTerminalId;
+  state.bottomPanelVisible = next.bottomPanelVisible;
   updateLayout();
 }
 
 function handleCloseTerminal(id: string) {
-  state.terminals = state.terminals.filter((t) => t.id !== id);
-  if (state.activeTerminalId === id) {
-    state.activeTerminalId =
-      state.terminals[state.terminals.length - 1]?.id ?? null;
-  }
-  if (state.terminals.length === 0) {
-    state.bottomPanelVisible = false;
-  }
+  const next = closeTerminal(
+    {
+      terminals: state.terminals,
+      activeTerminalId: state.activeTerminalId,
+      bottomPanelVisible: state.bottomPanelVisible,
+    },
+    id
+  );
+  state.terminals = next.terminals;
+  state.activeTerminalId = next.activeTerminalId;
+  state.bottomPanelVisible = next.bottomPanelVisible;
   updateLayout();
 }
 
 function handleSwitchTerminal(id: string) {
-  state.activeTerminalId = id;
-  state.bottomPanelVisible = true;
+  const next = switchTerminal(
+    {
+      terminals: state.terminals,
+      activeTerminalId: state.activeTerminalId,
+      bottomPanelVisible: state.bottomPanelVisible,
+    },
+    id
+  );
+  state.activeTerminalId = next.activeTerminalId;
+  state.bottomPanelVisible = next.bottomPanelVisible;
   updateLayout();
 }
 
@@ -543,36 +444,6 @@ async function handleFileDrop(
   }
 }
 
-function findPane(root: PaneNode, id: string): EditorPane | null {
-  if (root.type === "editor") return root.id === id ? root : null;
-  for (const child of root.children) {
-    const found = findPane(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-function replacePane(
-  root: PaneNode,
-  id: string,
-  replacement: PaneNode
-): PaneNode {
-  if (root.type === "editor") {
-    return root.id === id ? replacement : root;
-  }
-  return {
-    type: "split",
-    direction: root.direction,
-    children: root.children.map((child) =>
-      containsPane(child, id) ? replacePane(child, id, replacement) : child
-    ),
-  };
-}
-
-function containsPane(root: PaneNode, id: string): boolean {
-  if (root.type === "editor") return root.id === id;
-  return root.children.some((child) => containsPane(child, id));
-}
 
 document.addEventListener("DOMContentLoaded", async () => {
   const app = document.getElementById("app");
