@@ -269,13 +269,19 @@ mod tests {
         }
     }
 
-    struct FakeProcessBackend {
-        rx: Mutex<Option<std::sync::mpsc::Receiver<Vec<u8>>>>,
-        input: Arc<Mutex<Vec<u8>>>,
-        killed: Arc<Mutex<bool>>,
+    struct Unspawned {
+        rx: std::sync::mpsc::Receiver<Vec<u8>>,
     }
 
-    impl FakeProcessBackend {
+    struct Spawned;
+
+    struct FakeProcessBackend<S> {
+        input: Arc<Mutex<Vec<u8>>>,
+        killed: Arc<Mutex<bool>>,
+        state: S,
+    }
+
+    impl FakeProcessBackend<Unspawned> {
         fn new() -> (Self, FakeProcessHandle) {
             let (tx, rx) = std::sync::mpsc::channel();
             let input = Arc::new(Mutex::new(Vec::new()));
@@ -283,28 +289,25 @@ mod tests {
             let handle = FakeProcessHandle {
                 tx,
                 input: input.clone(),
+                killed: killed.clone(),
             };
             (
                 Self {
-                    rx: Mutex::new(Some(rx)),
                     input,
                     killed,
+                    state: Unspawned { rx },
                 },
                 handle,
             )
         }
-    }
 
-    impl ProcessBackend for FakeProcessBackend {
-        fn spawn(&self, _shell: &str, _cwd: &str) -> Result<SpawnedProcess, String> {
-            let rx = self
-                .rx
-                .lock()
-                .unwrap()
-                .take()
-                .ok_or("fake backend already spawned")?;
+        fn spawn(
+            self,
+            _shell: &str,
+            _cwd: &str,
+        ) -> (SpawnedProcess, FakeProcessBackend<Spawned>) {
             let reader = Box::new(ChannelReader {
-                rx,
+                rx: self.state.rx,
                 pending: Vec::new(),
                 pos: 0,
             });
@@ -314,13 +317,19 @@ mod tests {
                     killed: self.killed.clone(),
                 },
             ));
-            Ok(SpawnedProcess { reader, session })
+            let spawned_backend = FakeProcessBackend {
+                input: self.input,
+                killed: self.killed,
+                state: Spawned,
+            };
+            (SpawnedProcess { reader, session }, spawned_backend)
         }
     }
 
     struct FakeProcessHandle {
         tx: std::sync::mpsc::Sender<Vec<u8>>,
         input: Arc<Mutex<Vec<u8>>>,
+        killed: Arc<Mutex<bool>>,
     }
 
     impl FakeProcessHandle {
@@ -331,12 +340,16 @@ mod tests {
         fn input(&self) -> Vec<u8> {
             self.input.lock().unwrap().clone()
         }
+
+        fn killed(&self) -> bool {
+            *self.killed.lock().unwrap()
+        }
     }
 
     #[test]
     fn fake_backend_records_input_and_output() {
         let (backend, handle) = FakeProcessBackend::new();
-        let spawned = backend.spawn("sh", "/").unwrap();
+        let (spawned, _spawned_backend) = backend.spawn("sh", "/");
 
         spawned
             .session
@@ -351,5 +364,21 @@ mod tests {
         let mut buf = [0u8; 16];
         let n = reader.read(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"world");
+    }
+
+    // The type system prevents spawning a FakeProcessBackend<Spawned>:
+    // `spawn` is only available on `FakeProcessBackend<Unspawned>`, so a
+    // second call would fail to compile.
+    #[test]
+    fn spawned_backend_preserves_kill_and_input_state() {
+        let (backend, handle) = FakeProcessBackend::new();
+        let (spawned, _spawned_backend) = backend.spawn("sh", "/");
+        spawned
+            .session
+            .lock()
+            .unwrap()
+            .kill()
+            .unwrap();
+        assert!(handle.killed());
     }
 }

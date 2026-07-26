@@ -26,8 +26,20 @@ import {
   moveTabToPane,
   closeTab,
   activePane,
+  emptyEditorPane,
+  addTab,
+  setActiveTabByPath,
+  activeTabPath,
+  removeTab,
 } from "./editorTree.js";
-import { createTerminal, closeTerminal, switchTerminal } from "./terminalState.js";
+import {
+  noTerminals,
+  createTerminal,
+  closeTerminal,
+  switchTerminal,
+  toggleTerminal,
+  type TerminalState,
+} from "./terminalState.js";
 import { createLocalLayoutStorage, type LayoutStorage } from "./layoutStorage.js";
 import {
   createLocalRecentFolderStore,
@@ -45,25 +57,16 @@ interface AppState {
   rootPath: string | null;
   editorRoot: PaneNode;
   activePaneId: string;
-  bottomPanelVisible: boolean;
-  terminals: TerminalInfo[];
-  activeTerminalId: string | null;
+  terminalState: TerminalState;
   sidebarWidth: number;
   terminalHeight: number;
 }
 
 const state: AppState = {
   rootPath: null,
-  editorRoot: {
-    type: "editor",
-    id: "pane-1",
-    tabs: [],
-    activeTabPath: null,
-  },
+  editorRoot: emptyEditorPane("pane-1"),
   activePaneId: "pane-1",
-  bottomPanelVisible: false,
-  terminals: [],
-  activeTerminalId: null,
+  terminalState: noTerminals,
   sidebarWidth: 256,
   terminalHeight: 192,
 };
@@ -90,31 +93,62 @@ function saveLayout() {
   layoutStorage.save(state.rootPath, {
     editorRoot: state.editorRoot,
     activePaneId: state.activePaneId,
-    bottomPanelVisible: state.bottomPanelVisible,
-    terminals: state.terminals,
-    activeTerminalId: state.activeTerminalId,
+    terminalState: state.terminalState,
     sidebarWidth: state.sidebarWidth,
     terminalHeight: state.terminalHeight,
   });
 }
 
+function migrateTerminalState(saved: Record<string, unknown>): TerminalState {
+  const terminals = Array.isArray(saved.terminals)
+    ? (saved.terminals as TerminalInfo[])
+    : [];
+  const activeTerminalId = (saved.activeTerminalId as string | null) ?? null;
+  const bottomPanelVisible = (saved.bottomPanelVisible as boolean) ?? false;
+  if (terminals.length === 0) {
+    return noTerminals;
+  }
+  const active = terminals.some((t) => t.id === activeTerminalId)
+    ? activeTerminalId!
+    : terminals[terminals.length - 1].id;
+  return {
+    kind: "terminalsOpen",
+    terminals: terminals as [TerminalInfo, ...TerminalInfo[]],
+    activeTerminalId: active,
+    bottomPanelVisible,
+  };
+}
+
 function loadLayout(rootPath: string) {
   const raw = layoutStorage.load(rootPath);
   if (!raw) return null;
+  const terminalState =
+    "terminalState" in raw && raw.terminalState !== undefined
+      ? raw.terminalState
+      : migrateTerminalState(raw as unknown as Record<string, unknown>);
   return {
     ...raw,
     editorRoot: hydratePane(raw.editorRoot),
+    terminalState,
   };
 }
 
 function hydratePane(data: unknown): PaneNode {
   const d = data as Record<string, unknown>;
   if (d.type === "editor") {
+    const tabs = Array.isArray(d.tabs) ? (d.tabs as TabInfo[]) : [];
+    const activeTabPath = (d.activeTabPath as string | null) ?? null;
+    const id = (d.id as string) ?? newPaneId();
+    if (tabs.length === 0) {
+      return emptyEditorPane(id);
+    }
+    const activeTab =
+      tabs.find((t) => t.path === activeTabPath) ?? tabs[tabs.length - 1];
     return {
       type: "editor",
-      id: (d.id as string) ?? newPaneId(),
-      tabs: Array.isArray(d.tabs) ? (d.tabs as TabInfo[]) : [],
-      activeTabPath: (d.activeTabPath as string | null) ?? null,
+      id,
+      tabs: tabs as [TabInfo, ...TabInfo[]],
+      activeTab,
     };
   }
   return {
@@ -128,11 +162,7 @@ function hydratePane(data: unknown): PaneNode {
 
 function updateLayout() {
   layout?.updateEditorRoot(state.editorRoot, state.activePaneId);
-  layout?.updateTerminals(
-    state.bottomPanelVisible,
-    state.terminals,
-    state.activeTerminalId
-  );
+  layout?.updateTerminals(state.terminalState);
   saveLayout();
 }
 
@@ -157,29 +187,24 @@ async function openFolder(path: string) {
   if (saved) {
     state.editorRoot = saved.editorRoot;
     state.activePaneId = saved.activePaneId;
-    state.bottomPanelVisible = saved.bottomPanelVisible;
-    state.terminals = saved.terminals;
-    state.activeTerminalId = saved.activeTerminalId;
+    state.terminalState = saved.terminalState;
     state.sidebarWidth = saved.sidebarWidth ?? 256;
     state.terminalHeight = saved.terminalHeight ?? 192;
   } else {
-    state.editorRoot = {
-      type: "editor",
-      id: "pane-1",
-      tabs: [],
-      activeTabPath: null,
-    };
+    state.editorRoot = emptyEditorPane("pane-1");
     state.activePaneId = "pane-1";
-    state.bottomPanelVisible = false;
-    state.terminals = [];
-    state.activeTerminalId = null;
+    state.terminalState = noTerminals;
     state.sidebarWidth = 256;
     state.terminalHeight = 192;
     paneCounter = 1;
     terminalCounter = 0;
   }
 
-  const maxTerminal = state.terminals.reduce((max, t) => {
+  const terminals =
+    state.terminalState.kind === "terminalsOpen"
+      ? state.terminalState.terminals
+      : [];
+  const maxTerminal = terminals.reduce((max, t) => {
     const n = parseInt(t.id.replace("terminal-", ""), 10);
     return isNaN(n) ? max : Math.max(max, n);
   }, 0);
@@ -212,15 +237,19 @@ async function handleFileClick(path: string, name: string) {
   const pane = getActivePane();
   const existing = pane.tabs.find((t) => t.path === path);
   if (existing) {
-    pane.activeTabPath = path;
+    state.editorRoot = replacePane(
+      state.editorRoot,
+      pane.id,
+      setActiveTabByPath(pane, path)
+    );
     updateLayout();
     return;
   }
 
   try {
     const content = await readFile(path);
-    pane.tabs.push({ path, name, content, dirty: false });
-    pane.activeTabPath = path;
+    const tab = { path, name, content, dirty: false };
+    state.editorRoot = replacePane(state.editorRoot, pane.id, addTab(pane, tab));
     lspManager?.openDocument(path, languageForFile(name), content);
     updateLayout();
   } catch (err) {
@@ -250,7 +279,11 @@ function handleTabClick(paneId: string, path: string) {
   const pane = findPane(state.editorRoot, paneId);
   if (!pane) return;
   state.activePaneId = paneId;
-  pane.activeTabPath = path;
+  state.editorRoot = replacePane(
+    state.editorRoot,
+    paneId,
+    setActiveTabByPath(pane, path)
+  );
   updateLayout();
 }
 
@@ -269,13 +302,10 @@ function handleSplit(
   const pane = findPane(state.editorRoot, paneId);
   if (!pane) return;
 
-  const activeTab = pane.tabs.find((t) => t.path === pane.activeTabPath);
-  const newPane: EditorPane = {
-    type: "editor",
-    id: newPaneId(),
-    tabs: activeTab ? [{ ...activeTab }] : [],
-    activeTabPath: activeTab?.path ?? null,
-  };
+  const activeTab = pane.activeTab;
+  const newPane = activeTab
+    ? addTab(emptyEditorPane(newPaneId()), activeTab)
+    : emptyEditorPane(newPaneId());
 
   state.editorRoot = splitPane(state.editorRoot, paneId, direction, newPane, side);
   state.activePaneId = newPane.id;
@@ -309,25 +339,16 @@ function handleSplitDrop(
     dirty: dropped.dirty,
   };
 
-  if (sourcePane) {
-    sourcePane.tabs = sourcePane.tabs.filter((t) => t.path !== tab.path);
-    if (sourcePane.activeTabPath === tab.path) {
-      sourcePane.activeTabPath =
-        sourcePane.tabs[sourcePane.tabs.length - 1]?.path ?? null;
-    }
+  let updated = state.editorRoot;
+  if (sourcePane && sourcePaneId) {
+    updated = replacePane(updated, sourcePaneId, removeTab(sourcePane, tab.path));
   }
 
   const dir = direction === "left" || direction === "right" ? "row" : "column";
-  const newPane: EditorPane = {
-    type: "editor",
-    id: newPaneId(),
-    tabs: [tab],
-    activeTabPath: tab.path,
-  };
+  const newPane = addTab(emptyEditorPane(newPaneId()), tab);
 
-  state.editorRoot = splitPane(state.editorRoot, targetPaneId, dir, newPane, direction);
-  state.activePaneId = newPane.id;
-  const pruned = pruneEmptyPanes(state.editorRoot, state.activePaneId);
+  updated = splitPane(updated, targetPaneId, dir, newPane, direction);
+  const pruned = pruneEmptyPanes(updated, newPane.id);
   state.editorRoot = pruned.root;
   state.activePaneId = pruned.activePaneId;
   updateLayout();
@@ -336,7 +357,7 @@ function handleSplitDrop(
 async function handleSave(paneId: string) {
   const pane = findPane(state.editorRoot, paneId);
   if (!pane || !layout) return;
-  const tab = pane.tabs.find((t) => t.path === pane.activeTabPath);
+  const tab = pane.activeTab;
   if (!tab) return;
   try {
     const content = layout.getPaneContent(paneId);
@@ -354,7 +375,7 @@ async function handleSave(paneId: string) {
 function handleContentChange(paneId: string, content: string) {
   const pane = findPane(state.editorRoot, paneId);
   if (!pane) return;
-  const tab = pane.tabs.find((t) => t.path === pane.activeTabPath);
+  const tab = pane.activeTab;
   if (!tab) return;
   tab.content = content;
   if (!tab.dirty) {
@@ -389,29 +410,17 @@ function handlePaneFocus(paneId: string) {
 }
 
 function handleToggleTerminal() {
-  state.bottomPanelVisible = !state.bottomPanelVisible;
-  if (state.bottomPanelVisible && state.terminals.length === 0) {
+  if (state.terminalState.kind === "noTerminals") {
     handleNewTerminal();
     return;
   }
+  state.terminalState = toggleTerminal(state.terminalState);
   updateLayout();
 }
 
 function addTaskTerminal(name: string, cwd: string): string {
   const id = newTerminalId();
-  const next = createTerminal(
-    {
-      terminals: state.terminals,
-      activeTerminalId: state.activeTerminalId,
-      bottomPanelVisible: state.bottomPanelVisible,
-    },
-    id,
-    name,
-    cwd
-  );
-  state.terminals = next.terminals;
-  state.activeTerminalId = next.activeTerminalId;
-  state.bottomPanelVisible = next.bottomPanelVisible;
+  state.terminalState = createTerminal(state.terminalState, id, name, cwd);
   updateLayout();
   return id;
 }
@@ -432,50 +441,23 @@ async function runTask(label: string) {
 
 function handleNewTerminal() {
   const id = newTerminalId();
-  const name = `Terminal ${state.terminals.length + 1}`;
+  const name = `Terminal ${
+    state.terminalState.kind === "terminalsOpen"
+      ? state.terminalState.terminals.length + 1
+      : 1
+  }`;
   const cwd = state.rootPath ?? "/";
-  const next = createTerminal(
-    {
-      terminals: state.terminals,
-      activeTerminalId: state.activeTerminalId,
-      bottomPanelVisible: state.bottomPanelVisible,
-    },
-    id,
-    name,
-    cwd
-  );
-  state.terminals = next.terminals;
-  state.activeTerminalId = next.activeTerminalId;
-  state.bottomPanelVisible = next.bottomPanelVisible;
+  state.terminalState = createTerminal(state.terminalState, id, name, cwd);
   updateLayout();
 }
 
 function handleCloseTerminal(id: string) {
-  const next = closeTerminal(
-    {
-      terminals: state.terminals,
-      activeTerminalId: state.activeTerminalId,
-      bottomPanelVisible: state.bottomPanelVisible,
-    },
-    id
-  );
-  state.terminals = next.terminals;
-  state.activeTerminalId = next.activeTerminalId;
-  state.bottomPanelVisible = next.bottomPanelVisible;
+  state.terminalState = closeTerminal(state.terminalState, id);
   updateLayout();
 }
 
 function handleSwitchTerminal(id: string) {
-  const next = switchTerminal(
-    {
-      terminals: state.terminals,
-      activeTerminalId: state.activeTerminalId,
-      bottomPanelVisible: state.bottomPanelVisible,
-    },
-    id
-  );
-  state.activeTerminalId = next.activeTerminalId;
-  state.bottomPanelVisible = next.bottomPanelVisible;
+  state.terminalState = switchTerminal(state.terminalState, id);
   updateLayout();
 }
 
@@ -490,12 +472,20 @@ async function handleFileDrop(
     if (!targetPane) return;
     const existing = targetPane.tabs.find((t) => t.path === path);
     if (existing) {
-      targetPane.activeTabPath = path;
+      state.editorRoot = replacePane(
+        state.editorRoot,
+        targetPaneId,
+        setActiveTabByPath(targetPane, path)
+      );
     } else {
       try {
         const content = await readFile(path);
-        targetPane.tabs.push({ path, name, content, dirty: false });
-        targetPane.activeTabPath = path;
+        const tab = { path, name, content, dirty: false };
+        state.editorRoot = replacePane(
+          state.editorRoot,
+          targetPaneId,
+          addTab(targetPane, tab)
+        );
       } catch (err) {
         console.error("Failed to read file:", err);
         alert(`Failed to read file: ${err}`);
@@ -510,12 +500,12 @@ async function handleFileDrop(
     const content = await readFile(path);
     const dir = zone === "left" || zone === "right" ? "row" : "column";
     const isNewPaneFirst = zone === "left" || zone === "top";
-    const newPane: EditorPane = {
-      type: "editor",
-      id: newPaneId(),
-      tabs: [{ path, name, content, dirty: false }],
-      activeTabPath: path,
-    };
+    const newPane = addTab(emptyEditorPane(newPaneId()), {
+      path,
+      name,
+      content,
+      dirty: false,
+    });
     const targetPane = findPane(state.editorRoot, targetPaneId);
     if (!targetPane) return;
     state.editorRoot = replacePane(state.editorRoot, targetPaneId, {
@@ -577,8 +567,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     await listen("menu-save", () => handleSave(state.activePaneId));
     await listen("menu-close-tab", () => {
       const pane = findPane(state.editorRoot, state.activePaneId);
-      if (pane?.activeTabPath) {
-        handleTabClose(state.activePaneId, pane.activeTabPath);
+      if (pane?.activeTab?.path) {
+        handleTabClose(state.activePaneId, pane.activeTab.path);
       }
     });
     await listen("menu-split-horizontal", () =>
@@ -590,8 +580,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     await listen("menu-toggle-terminal", () => handleToggleTerminal());
     await listen("menu-new-terminal", () => handleNewTerminal());
     await listen("menu-kill-terminal", () => {
-      if (state.activeTerminalId) {
-        handleCloseTerminal(state.activeTerminalId);
+      if (
+        state.terminalState.kind === "terminalsOpen" &&
+        state.terminalState.activeTerminalId
+      ) {
+        handleCloseTerminal(state.terminalState.activeTerminalId);
       }
     });
     await listen("menu-run-build-task", () => runTask("build"));

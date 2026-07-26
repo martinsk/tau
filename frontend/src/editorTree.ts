@@ -1,5 +1,70 @@
-import type { PaneNode, EditorPane, SplitPane } from "./components/Layout.js";
+import type {
+  PaneNode,
+  EditorPane,
+  EmptyEditorPane,
+  ActiveEditorPane,
+  SplitPane,
+} from "./components/Layout.js";
 import type { TabInfo } from "./components/Tabs.js";
+
+function nonEmptyTabs(tabs: TabInfo[]): [TabInfo, ...TabInfo[]] {
+  if (tabs.length === 0) {
+    throw new Error("expected non-empty tabs");
+  }
+  return tabs as [TabInfo, ...TabInfo[]];
+}
+
+export function emptyEditorPane(id: string): EmptyEditorPane {
+  return { type: "editor", id, tabs: [], activeTab: null };
+}
+
+export function addTab(pane: EditorPane, tab: TabInfo): ActiveEditorPane {
+  return {
+    type: "editor",
+    id: pane.id,
+    tabs: nonEmptyTabs([...pane.tabs.filter((t) => t.path !== tab.path), tab]),
+    activeTab: tab,
+  };
+}
+
+export function setActiveTabByPath(
+  pane: EditorPane,
+  path: string
+): EditorPane {
+  const existing = pane.tabs.find((t) => t.path === path);
+  if (!existing) return pane;
+  if (pane.activeTab === existing) return pane;
+  return {
+    type: "editor",
+    id: pane.id,
+    tabs: nonEmptyTabs(pane.tabs),
+    activeTab: existing,
+  };
+}
+
+export function removeTab(
+  pane: EditorPane,
+  path: string
+): EditorPane {
+  const tabs = pane.tabs.filter((t) => t.path !== path);
+  if (tabs.length === 0) {
+    return emptyEditorPane(pane.id);
+  }
+  const activeTab =
+    pane.activeTab && pane.activeTab.path !== path
+      ? pane.activeTab
+      : tabs[tabs.length - 1];
+  return {
+    type: "editor",
+    id: pane.id,
+    tabs: nonEmptyTabs(tabs),
+    activeTab,
+  };
+}
+
+export function activeTabPath(pane: EditorPane): string | null {
+  return pane.activeTab?.path ?? null;
+}
 
 export function findPane(root: PaneNode, id: string): EditorPane | null {
   if (root.type === "editor") return root.id === id ? root : null;
@@ -52,9 +117,7 @@ export function pruneNode(node: PaneNode, isRoot: boolean): PaneNode | null {
     if (pruned) children.push(pruned);
   }
   if (children.length === 0) {
-    return isRoot
-      ? { type: "editor", id: "pane-1", tabs: [], activeTabPath: null }
-      : null;
+    return isRoot ? emptyEditorPane("pane-1") : null;
   }
   if (children.length === 1) return children[0];
   return { type: "split", direction: node.direction, children };
@@ -65,13 +128,7 @@ export function pruneEmptyPanes(
   activePaneId: string
 ): { root: PaneNode; activePaneId: string } {
   const pruned = pruneNode(root, true);
-  const newRoot: PaneNode =
-    pruned ?? {
-      type: "editor",
-      id: "pane-1",
-      tabs: [],
-      activeTabPath: null,
-    };
+  const newRoot: PaneNode = pruned ?? emptyEditorPane("pane-1");
   const activeExists = findPane(newRoot, activePaneId) !== null;
   if (!activeExists) {
     const first = firstEditorPane(newRoot);
@@ -109,22 +166,14 @@ export function moveTabToPane(
   if (sourcePaneId && sourcePaneId !== targetPaneId) {
     const source = findPane(updated, sourcePaneId);
     if (source) {
-      source.tabs = source.tabs.filter((t) => t.path !== tab.path);
-      if (source.activeTabPath === tab.path) {
-        source.activeTabPath =
-          source.tabs[source.tabs.length - 1]?.path ?? null;
-      }
+      updated = replacePane(updated, sourcePaneId, removeTab(source, tab.path));
     }
   }
 
   const target = findPane(updated, targetPaneId);
   if (!target) return updated;
 
-  if (!target.tabs.some((t) => t.path === tab.path)) {
-    target.tabs.push({ ...tab });
-  }
-  target.activeTabPath = tab.path;
-  return updated;
+  return replacePane(updated, targetPaneId, addTab(target, tab));
 }
 
 export function closeTab(
@@ -136,12 +185,9 @@ export function closeTab(
 ): { root: PaneNode; activePaneId: string } {
   const pane = findPane(root, paneId);
   if (!pane) return { root, activePaneId };
-  pane.tabs = pane.tabs.filter((t) => t.path !== path);
-  if (pane.activeTabPath === path) {
-    pane.activeTabPath = pane.tabs[pane.tabs.length - 1]?.path ?? null;
-  }
-  if (keepEmptyPane) return { root, activePaneId };
-  return pruneEmptyPanes(root, activePaneId);
+  const updatedRoot = replacePane(root, paneId, removeTab(pane, path));
+  if (keepEmptyPane) return { root: updatedRoot, activePaneId };
+  return pruneEmptyPanes(updatedRoot, activePaneId);
 }
 
 export function activePane(
@@ -152,6 +198,6 @@ export function activePane(
   if (pane) return { pane, activePaneId };
   const first = firstEditorPane(root);
   if (first) return { pane: first, activePaneId: first.id };
-  const fallback = root as EditorPane;
+  const fallback = emptyEditorPane("pane-1");
   return { pane: fallback, activePaneId: fallback.id };
 }

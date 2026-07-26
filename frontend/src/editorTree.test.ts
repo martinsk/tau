@@ -6,27 +6,20 @@ import {
   splitPane,
   moveTabToPane,
   activePane,
+  emptyEditorPane,
+  addTab,
+  activeTabPath,
 } from "./editorTree.js";
 import type { EditorPane, PaneNode } from "./components/Layout.js";
 
 function editor(id: string, paths: string[]): EditorPane {
-  return {
-    type: "editor",
-    id,
-    tabs: paths.map((p) => ({
-      path: p,
-      name: p,
-      content: "",
-      dirty: false,
-    })),
-    activeTabPath: paths[paths.length - 1] ?? null,
-  };
+  return paths.reduce<EditorPane>(
+    (pane, path) => addTab(pane, { path, name: path, content: "", dirty: false }),
+    emptyEditorPane(id)
+  );
 }
 
-function split(
-  direction: "row" | "column",
-  children: PaneNode[]
-): PaneNode {
+function split(direction: "row" | "column", children: PaneNode[]): PaneNode {
   return { type: "split", direction, children };
 }
 
@@ -45,10 +38,7 @@ describe("editorTree", () => {
   });
 
   it("prunes empty panes after a tab close", () => {
-    const root = split("row", [
-      editor("a", ["x"]),
-      editor("b", []),
-    ]);
+    const root = split("row", [editor("a", ["x"]), editor("b", [])]);
     const next = pruneEmptyPanes(root, "a");
     expect(findPane(next.root, "b")).toBeNull();
     expect(findPane(next.root, "a")).not.toBeNull();
@@ -77,5 +67,19 @@ describe("editorTree", () => {
     const result = activePane(root, "missing");
     expect(result.pane.id).toBe("a");
     expect(result.activePaneId).toBe("a");
+  });
+
+  it("adds a tab and sets it active", () => {
+    const pane = editor("a", ["x"]);
+    const next = addTab(pane, { path: "y", name: "y", content: "", dirty: false });
+    expect(next.tabs.map((t) => t.path)).toEqual(["x", "y"]);
+    expect(activeTabPath(next)).toBe("y");
+  });
+
+  it("deduplicates tabs when adding a tab that already exists", () => {
+    const pane = editor("a", ["x", "y"]);
+    const next = addTab(pane, { path: "x", name: "x", content: "", dirty: false });
+    expect(next.tabs.map((t) => t.path)).toEqual(["y", "x"]);
+    expect(activeTabPath(next)).toBe("x");
   });
 });

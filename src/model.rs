@@ -107,8 +107,11 @@ impl Project {
     }
 }
 
+pub mod builder;
 pub mod query;
 pub mod validate;
+
+pub use builder::{Draft, ProjectBuilder, Validated};
 
 #[cfg(test)]
 mod tests {

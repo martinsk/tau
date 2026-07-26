@@ -1,12 +1,10 @@
 import type { PaneNode } from "./components/Layout.js";
-import type { TerminalInfo } from "./components/Layout.js";
+import type { TerminalState } from "./components/Layout.js";
 
 export interface SavedLayout {
   editorRoot: PaneNode;
   activePaneId: string;
-  bottomPanelVisible: boolean;
-  terminals: TerminalInfo[];
-  activeTerminalId: string | null;
+  terminalState: TerminalState;
   sidebarWidth?: number;
   terminalHeight?: number;
 }

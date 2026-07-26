@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{ContainerId, ItemId, Project};
+use crate::model::{ContainerId, ItemId, Project, ReferenceId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValidationError {
     MissingContainer { id: ContainerId },
     MissingItem { id: ItemId },
+    DuplicateContainer { id: ContainerId },
+    DuplicateItem { id: ItemId },
+    DuplicateReference { id: ReferenceId },
     OrphanContainer { id: ContainerId },
     RootHasParent { id: ContainerId, parents: Vec<ContainerId> },
     MultipleParents { id: ContainerId, parents: Vec<ContainerId> },

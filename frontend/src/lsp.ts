@@ -1,4 +1,9 @@
 import * as monaco from "monaco-editor";
+import {
+  isLspMessage,
+  isResponse,
+  type LspMessage,
+} from "./lspMessage.js";
 
 interface LspServerSettings {
   command: string;
@@ -9,14 +14,7 @@ export interface LspSettings {
   languageServers?: Record<string, LspServerSettings>;
 }
 
-interface LspMessage {
-  jsonrpc: "2.0";
-  id?: number;
-  method?: string;
-  params?: unknown;
-  result?: unknown;
-  error?: unknown;
-}
+export { isLspMessage, isResponse, type LspMessage } from "./lspMessage.js";
 
 const defaultServers: Record<string, LspServerSettings> = {
   rust: { command: "rust-analyzer", args: [] },
@@ -41,58 +39,65 @@ export async function loadLspSettings(rootPath: string): Promise<LspSettings> {
   }
 }
 
-export class LspClient {
-  private child: {
-    write(data: string): Promise<void>;
-    kill(): Promise<void>;
-  } | null = null;
+type LspClientState = "notStarted" | "running" | "stopped";
+
+interface LspChild {
+  write(data: string): Promise<void>;
+  kill(): Promise<void>;
+}
+
+export class LspClient<S extends LspClientState = LspClientState> {
+  private child: LspChild | null = null;
   private unlisteners: (() => void)[] = [];
   private idCounter = 0;
   private pending = new Map<number, (response: unknown) => void>();
   private buffer = "";
-  private stopped = false;
 
-  constructor(private program: string, private args: string[]) {}
+  private constructor(private program: string, private args: string[]) {}
 
-  async start(rootUri: string): Promise<void> {
+  static create(program: string, args: string[]): LspClient<"notStarted"> {
+    return new LspClient<"notStarted">(program, args);
+  }
+
+  async start(this: LspClient<"notStarted">, rootUri: string): Promise<LspClient<"running">> {
     const { Command } = await import("@tauri-apps/plugin-shell");
-    const cmd = Command.create(this.program, this.args);
+    const running = new LspClient<"running">(this.program, this.args);
+    const cmd = Command.create(running.program, running.args);
     const child = await cmd.spawn();
-    this.child = child;
+    running.child = child;
     const unlistenOut = cmd.stdout.on("data", (line: string) =>
-      this.onData(line)
+      running.onData(line)
     ) as unknown as () => void;
     const unlistenErr = cmd.stderr.on("data", (line: string) =>
       console.error("LSP stderr:", line)
     ) as unknown as () => void;
-    this.unlisteners.push(unlistenOut, unlistenErr);
+    running.unlisteners.push(unlistenOut, unlistenErr);
 
     try {
-      await this.request("initialize", {
+      await running.request("initialize", {
         processId: null,
         rootUri,
         capabilities: {},
         workspaceFolders: null,
       });
-      this.notify("initialized", {});
+      running.notify("initialized", {});
     } catch (err) {
-      this.stop();
+      running.stop();
       throw err;
     }
+    return running;
   }
 
-  stop(): void {
-    this.stopped = true;
+  stop(this: LspClient<"running">): LspClient<"stopped"> {
+    const stopped = new LspClient<"stopped">(this.program, this.args);
     this.child?.kill().catch(console.error);
-    this.child = null;
     for (const unlisten of this.unlisteners) {
       unlisten();
     }
-    this.unlisteners = [];
     for (const reject of this.pending.values()) {
       reject(new Error("LSP client stopped"));
     }
-    this.pending.clear();
+    return stopped;
   }
 
   private onData(chunk: string) {
@@ -106,11 +111,17 @@ export class LspClient {
       const body = this.buffer.slice(start, start + len);
       this.buffer = this.buffer.slice(start + len);
       try {
-        const msg = JSON.parse(body) as LspMessage;
-        if (msg.id !== undefined && this.pending.has(msg.id)) {
-          this.pending.get(msg.id)!(msg.result);
-          this.pending.delete(msg.id);
+        const value = JSON.parse(body);
+        if (!isLspMessage(value)) continue;
+        if (!isResponse(value)) continue;
+        const resolver = this.pending.get(value.id);
+        if (!resolver) continue;
+        if ("error" in value) {
+          resolver(value.error);
+        } else {
+          resolver(value.result);
         }
+        this.pending.delete(value.id);
       } catch {
         // ignore malformed messages
       }
@@ -118,15 +129,15 @@ export class LspClient {
   }
 
   private send(msg: LspMessage): void {
-    if (!this.child || this.stopped) return;
+    if (!this.child) return;
     const body = JSON.stringify(msg);
     const payload = `Content-Length: ${body.length}\r\n\r\n${body}`;
     this.child.write(payload).catch(console.error);
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(this: LspClient<"running">, method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      if (!this.child || this.stopped) {
+      if (!this.child) {
         reject(new Error("LSP client not started"));
         return;
       }
@@ -136,13 +147,13 @@ export class LspClient {
     });
   }
 
-  notify(method: string, params: unknown): void {
+  notify(this: LspClient<"running">, method: string, params: unknown): void {
     this.send({ jsonrpc: "2.0", method, params });
   }
 }
 
 export class LspManager {
-  private clients = new Map<string, LspClient>();
+  private clients = new Map<string, LspClient<"running">>();
   private settings: LspSettings = {};
   private rootUri: string = "";
   private unregisters: (() => void)[] = [];
@@ -155,22 +166,23 @@ export class LspManager {
     this.settings = await loadLspSettings(this.rootPath);
   }
 
-  async ensureClient(languageId: string): Promise<LspClient | null> {
+  async ensureClient(languageId: string): Promise<LspClient<"running"> | null> {
     if (this.clients.has(languageId)) return this.clients.get(languageId)!;
 
     const config = this.settings.languageServers?.[languageId] ??
       defaultServers[languageId];
     if (!config) return null;
 
-    const client = new LspClient(config.command, config.args ?? []);
+    const client = LspClient.create(config.command, config.args ?? []);
+    let running: LspClient<"running">;
     try {
-      await client.start(this.rootUri);
+      running = await client.start(this.rootUri);
     } catch (err) {
       console.error(`Failed to start ${config.command}:`, err);
       return null;
     }
-    this.clients.set(languageId, client);
-    return client;
+    this.clients.set(languageId, running);
+    return running;
   }
 
   async openDocument(path: string, languageId: string, text: string): Promise<void> {

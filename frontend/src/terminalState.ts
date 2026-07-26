@@ -1,10 +1,12 @@
-import type { TerminalInfo } from "./components/Layout.js";
+import type { TerminalInfo, TerminalState } from "./components/Layout.js";
 
-export interface TerminalState {
-  terminals: TerminalInfo[];
-  activeTerminalId: string | null;
-  bottomPanelVisible: boolean;
-}
+export type { TerminalState } from "./components/Layout.js";
+
+export const noTerminals: TerminalState = {
+  kind: "noTerminals",
+  terminals: [],
+  bottomPanelVisible: false,
+};
 
 export function createTerminal(
   state: TerminalState,
@@ -12,35 +14,53 @@ export function createTerminal(
   name: string,
   cwd: string
 ): TerminalState {
+  const terminal: TerminalInfo = { id, name, cwd };
+  if (state.kind === "noTerminals") {
+    return {
+      kind: "terminalsOpen",
+      terminals: [terminal],
+      activeTerminalId: id,
+      bottomPanelVisible: true,
+    };
+  }
   return {
-    ...state,
-    terminals: [...state.terminals, { id, name, cwd }],
+    kind: "terminalsOpen",
+    terminals: [...state.terminals, terminal],
     activeTerminalId: id,
     bottomPanelVisible: true,
   };
 }
 
-export function closeTerminal(
-  state: TerminalState,
-  id: string
-): TerminalState {
-  const terminals = state.terminals.filter((t) => t.id !== id);
-  let activeTerminalId = state.activeTerminalId;
-  if (activeTerminalId === id) {
-    activeTerminalId = terminals[terminals.length - 1]?.id ?? null;
+export function closeTerminal(state: TerminalState, id: string): TerminalState {
+  if (state.kind === "noTerminals") {
+    return state;
   }
+
+  const terminals = state.terminals.filter((t) => t.id !== id);
+  if (terminals.length === 0) {
+    return noTerminals;
+  }
+
+  const activeTerminalId =
+    state.activeTerminalId === id
+      ? terminals[terminals.length - 1].id
+      : state.activeTerminalId;
+
   return {
-    ...state,
-    terminals,
+    kind: "terminalsOpen",
+    terminals: terminals as [TerminalInfo, ...TerminalInfo[]],
     activeTerminalId,
-    bottomPanelVisible: terminals.length > 0 ? state.bottomPanelVisible : false,
+    bottomPanelVisible: state.bottomPanelVisible,
   };
 }
 
-export function switchTerminal(
-  state: TerminalState,
-  id: string
-): TerminalState {
+export function switchTerminal(state: TerminalState, id: string): TerminalState {
+  if (state.kind === "noTerminals") {
+    return state;
+  }
+  if (!state.terminals.some((t) => t.id === id)) {
+    return state;
+  }
   return {
     ...state,
     activeTerminalId: id,
@@ -49,9 +69,11 @@ export function switchTerminal(
 }
 
 export function toggleTerminal(state: TerminalState): TerminalState {
+  if (state.kind === "noTerminals") {
+    return state;
+  }
   return {
     ...state,
-    bottomPanelVisible:
-      state.terminals.length === 0 ? state.bottomPanelVisible : !state.bottomPanelVisible,
+    bottomPanelVisible: !state.bottomPanelVisible,
   };
 }

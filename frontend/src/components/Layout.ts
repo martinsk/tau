@@ -6,22 +6,32 @@ import { createSplitPane } from "./SplitPane.js";
 import {
   createTerminalManager,
   type TerminalInfo,
+  type TerminalState,
   type TerminalManagerAPI,
 } from "./TerminalManager.js";
-export type { TerminalInfo } from "./TerminalManager.js";
+export type { TerminalInfo, TerminalState } from "./TerminalManager.js";
 import { createStatusBar } from "./StatusBar.js";
 import { createResizer } from "./Resizer.js";
 import type { FileNode } from "../api.js";
 import type { TabInfo } from "./Tabs.js";
 
-export type PaneNode = EditorPane | SplitPane;
-
-export interface EditorPane {
+export type EmptyEditorPane = {
   type: "editor";
   id: string;
-  tabs: TabInfo[];
-  activeTabPath: string | null;
-}
+  tabs: [];
+  activeTab: null;
+};
+
+export type ActiveEditorPane = {
+  type: "editor";
+  id: string;
+  tabs: [TabInfo, ...TabInfo[]];
+  activeTab: TabInfo;
+};
+
+export type EditorPane = EmptyEditorPane | ActiveEditorPane;
+
+export type PaneNode = EditorPane | SplitPane;
 
 export interface SplitPane {
   type: "split";
@@ -59,11 +69,7 @@ export interface LayoutAPI {
   updateTree: (nodes: FileNode[]) => void;
   updateEditorRoot: (root: PaneNode, activePaneId: string) => void;
   updatePaneTabs: (paneId: string) => void;
-  updateTerminals: (
-    visible: boolean,
-    terminals: TerminalInfo[],
-    activeId: string | null
-  ) => void;
+  updateTerminals: (state: TerminalState) => void;
   getPaneContent: (paneId: string) => string;
 }
 
@@ -166,8 +172,9 @@ export function createLayout(
   function renderPane(node: PaneNode): HTMLElement {
     if (node.type === "editor") {
       const api = getOrCreateEditorPane(node);
-      api.updateTabs(node.tabs, node.activeTabPath);
-      const active = node.tabs.find((t) => t.path === node.activeTabPath);
+      const tabs = node.tabs;
+      const active = node.activeTab;
+      api.updateTabs(tabs, active?.path ?? null);
       api.updateContent(active?.name ?? null, active?.content ?? "");
       return api.element;
     }
@@ -209,13 +216,13 @@ export function createLayout(
     const pane = findPane(currentRoot, paneId);
     const api = editorPanes.get(paneId);
     if (pane && api) {
-      api.updateTabs(pane.tabs, pane.activeTabPath);
+      api.updateTabs(pane.tabs, pane.activeTab?.path ?? null);
     }
   }
 
   function getActivePath(root: PaneNode, activePaneId: string): string | null {
     const pane = findPane(root, activePaneId);
-    return pane?.activeTabPath ?? null;
+    return pane?.activeTab?.path ?? null;
   }
 
   function findPane(root: PaneNode, id: string): EditorPane | null {
@@ -227,25 +234,29 @@ export function createLayout(
     return null;
   }
 
-  async function updateTerminals(
-    visible: boolean,
-    terminals: TerminalInfo[],
-    activeId: string | null
-  ) {
+  async function updateTerminals(state: TerminalState) {
+    if (state.kind === "noTerminals") {
+      for (const id of terminalManager.listTerminals()) {
+        await terminalManager.closeTerminal(id);
+      }
+      terminalManager.setVisible(false);
+      return;
+    }
+
     const existing = new Set(terminalManager.listTerminals());
-    for (const info of terminals) {
+    for (const info of state.terminals) {
       if (!existing.has(info.id)) {
         await terminalManager.addTerminal(info);
       }
     }
-    const ids = new Set(terminals.map((t) => t.id));
+    const ids = new Set(state.terminals.map((t) => t.id));
     for (const id of existing) {
       if (!ids.has(id)) {
         await terminalManager.closeTerminal(id);
       }
     }
-    if (activeId) terminalManager.setActive(activeId);
-    terminalManager.setVisible(visible);
+    terminalManager.setActive(state.activeTerminalId);
+    terminalManager.setVisible(state.bottomPanelVisible);
   }
 
   function getPaneContent(paneId: string): string {

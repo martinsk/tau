@@ -7,6 +7,15 @@ export interface TerminalInfo {
   cwd: string;
 }
 
+export type TerminalState =
+  | { kind: "noTerminals"; terminals: []; bottomPanelVisible: false }
+  | {
+      kind: "terminalsOpen";
+      terminals: [TerminalInfo, ...TerminalInfo[]];
+      activeTerminalId: TerminalInfo["id"];
+      bottomPanelVisible: boolean;
+    };
+
 export interface TerminalManagerCallbacks {
   onNewTerminal: () => void;
   onCloseTerminal: (id: string) => void;
