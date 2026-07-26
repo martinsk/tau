@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tau-bg: #1b1b1f;
+  --tau-sidebar: #232326;
+  --tau-panel: #1f1f23;
+  --tau-border: #34343a;
+  --tau-fg: #d7d7d9;
+  --tau-muted: #9ca3af;
+  --tau-accent: #c69c6d;
+  --tau-accent-hover: #d4a373;
+  --tau-active: #2c2c31;
+  --tau-active-hover: #3a3a40;
+}
+
+body {
+  @apply bg-tau-bg text-tau-fg;
+}

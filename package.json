@@ -1,0 +1,10 @@
+{
+  "name": "tau",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "TAURI_DEV_WATCHER_IGNORE_FILE=.taurignore npx --prefix frontend tauri dev",
+    "build": "npx --prefix frontend tauri build"
+  },
+  "devDependencies": {}
+}
