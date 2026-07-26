@@ -1,6 +1,13 @@
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
-import { createTerminal, terminalInput, terminalResize } from "../api.js";
+import {
+  agentSessionInput,
+  createAgentSession,
+  createTerminal,
+  resizeAgentSession,
+  terminalInput,
+  terminalResize,
+} from "../api.js";
 import { listen } from "@tauri-apps/api/event";
 
 import "xterm/css/xterm.css";
@@ -11,10 +18,17 @@ export interface TerminalAPI {
   dispose: () => void;
 }
 
+export interface TerminalLaunchOptions {
+  program?: string;
+  args?: string[];
+  agent?: boolean;
+}
+
 export async function createTerminalPane(
   id: string,
   cwd: string,
-  shell?: string
+  shell?: string,
+  options: TerminalLaunchOptions = {}
 ): Promise<TerminalAPI> {
   const container = document.createElement("div");
   container.className = "flex-1 min-w-0 min-h-0 bg-tau-bg p-1";
@@ -36,7 +50,8 @@ export async function createTerminalPane(
   term.open(container);
 
   term.onData((data: string) => {
-    terminalInput(id, data).catch(console.error);
+    const sendInput = options.agent ? agentSessionInput : terminalInput;
+    sendInput(id, data).catch(console.error);
   });
 
   const unlisten = await listen<{ id: string; data: string }>(
@@ -53,13 +68,18 @@ export async function createTerminalPane(
     term.dispose();
   });
 
-  await createTerminal(id, cwd, shell);
+  if (options.agent) {
+    await createAgentSession(id, cwd, options.program ?? "", options.args ?? []);
+  } else {
+    await createTerminal(id, cwd, shell);
+  }
 
   function fit() {
     fitAddon.fit();
     const dims = fitAddon.proposeDimensions();
     if (dims) {
-      terminalResize(id, dims.cols, dims.rows).catch(console.error);
+      const resize = options.agent ? resizeAgentSession : terminalResize;
+      resize(id, dims.cols, dims.rows).catch(console.error);
     }
   }
 

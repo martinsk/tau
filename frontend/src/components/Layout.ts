@@ -13,6 +13,8 @@ export type { TerminalInfo, TerminalState } from "./TerminalManager.js";
 import { createStatusBar } from "./StatusBar.js";
 import { createResizer } from "./Resizer.js";
 import { createSourceControl } from "./SourceControl.js";
+import { createAgentPanel } from "./AgentPanel.js";
+import type { HarnessConfig } from "../agentConfig.js";
 import type { FileNode, RepoStatus } from "../api.js";
 import type { TabInfo } from "./Tabs.js";
 
@@ -67,6 +69,10 @@ export interface LayoutCallbacks {
   onUnstageFile: (path: string) => void;
   onCommit: (message: string) => void;
   onOpenDiffFile: (path: string) => void;
+  onAgentStart: (config: HarnessConfig) => void;
+  onAgentStop: () => void;
+  onAgentConfigChange: (config: HarnessConfig) => void;
+  onAgentResize: (width: number) => void;
 }
 
 export interface LayoutAPI {
@@ -78,11 +84,23 @@ export interface LayoutAPI {
   getPaneContent: (paneId: string) => string;
   updateGitStatus: (status: RepoStatus | null) => void;
   showDiff: (path: string, diff: string) => void;
+  updateAgent: (
+    workspace: string | null,
+    config: HarnessConfig,
+    sessionId: string | null
+  ) => Promise<void>;
+  setAgentVisible: (visible: boolean) => void;
+  setAgentWidth: (width: number) => void;
 }
 
 export function createLayout(
   callbacks: LayoutCallbacks,
-  options: { sidebarWidth?: number; terminalHeight?: number } = {}
+  options: {
+    sidebarWidth?: number;
+    terminalHeight?: number;
+    agentWidth?: number;
+    agentVisible?: boolean;
+  } = {}
 ): LayoutAPI {
   const wrapper = document.createElement("div");
   wrapper.className = "flex flex-col h-screen w-screen overflow-hidden bg-tau-bg";
@@ -208,10 +226,31 @@ export function createLayout(
   mainArea.appendChild(terminalResizer.element);
   mainArea.appendChild(terminalManager.element);
 
+  const agentPanel = createAgentPanel({
+    onStart: callbacks.onAgentStart,
+    onStop: callbacks.onAgentStop,
+    onConfigChange: callbacks.onAgentConfigChange,
+  });
+  const agentWidth = Math.max(280, options.agentWidth ?? 400);
+  agentPanel.element.style.width = `${agentWidth}px`;
+  const agentResizer = createResizer({
+    direction: "row",
+    onChange(delta) {
+      const next = Math.max(280, agentPanel.element.offsetWidth - delta);
+      agentPanel.element.style.width = `${next}px`;
+      callbacks.onAgentResize(next);
+    },
+  });
+  const agentContainer = document.createElement("div");
+  agentContainer.className = "flex shrink-0 min-w-0";
+  agentContainer.append(agentResizer.element, agentPanel.element);
+  agentContainer.classList.toggle("hidden", !options.agentVisible);
+
   workspace.appendChild(activityBar);
   workspace.appendChild(sidebarContainer);
   workspace.appendChild(sidebarResizer.element);
   workspace.appendChild(mainArea);
+  workspace.appendChild(agentContainer);
 
   wrapper.appendChild(titleBar.element);
   wrapper.appendChild(workspace);
@@ -355,6 +394,24 @@ export function createLayout(
     changeBadge.classList.toggle("hidden", count === 0);
   }
 
+  async function updateAgent(
+    workspaceRoot: string | null,
+    config: HarnessConfig,
+    sessionId: string | null
+  ) {
+    agentPanel.updateWorkspace(workspaceRoot);
+    agentPanel.updateConfig(config);
+    await agentPanel.updateSession(sessionId, workspaceRoot);
+  }
+
+  function setAgentVisible(visible: boolean) {
+    agentContainer.classList.toggle("hidden", !visible);
+  }
+
+  function setAgentWidth(width: number) {
+    agentPanel.element.style.width = `${Math.max(280, width)}px`;
+  }
+
   function showDiff(path: string, diff: string) {
     sourceControl.showDiff(path, diff);
     if (activityView !== "source-control") {
@@ -372,5 +429,8 @@ export function createLayout(
     getPaneContent,
     updateGitStatus,
     showDiff,
+    updateAgent,
+    setAgentVisible,
+    setAgentWidth,
   };
 }

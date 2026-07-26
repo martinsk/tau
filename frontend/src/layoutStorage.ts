@@ -7,6 +7,8 @@ export interface SavedLayout {
   terminalState: TerminalState;
   sidebarWidth?: number;
   terminalHeight?: number;
+  agentWidth?: number;
+  agentVisible?: boolean;
 }
 
 export interface LayoutStorage {

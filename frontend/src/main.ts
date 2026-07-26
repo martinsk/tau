@@ -49,6 +49,12 @@ import {
 } from "./terminalState.js";
 import { createLocalLayoutStorage, type LayoutStorage } from "./layoutStorage.js";
 import {
+  createLocalAgentConfigStore,
+  parseProjectAgentConfig,
+  resolveHarness,
+  type HarnessConfig,
+} from "./agentConfig.js";
+import {
   createLocalRecentFolderStore,
   type RecentFolderStore,
 } from "./appStorage.js";
@@ -68,6 +74,10 @@ interface AppState {
   sidebarWidth: number;
   terminalHeight: number;
   gitStatus: RepoStatus | null;
+  agentWidth: number;
+  agentVisible: boolean;
+  agentConfig: HarnessConfig;
+  agentSessionId: string | null;
 }
 
 const state: AppState = {
@@ -78,12 +88,17 @@ const state: AppState = {
   sidebarWidth: 256,
   terminalHeight: 192,
   gitStatus: null,
+  agentWidth: 400,
+  agentVisible: false,
+  agentConfig: resolveHarness(null, null),
+  agentSessionId: null,
 };
 
 let layout: LayoutAPI | null = null;
 let lspManager: LspManager | null = null;
 const layoutStorage: LayoutStorage = createLocalLayoutStorage();
 const recentFolderStore: RecentFolderStore = createLocalRecentFolderStore();
+const agentConfigStore = createLocalAgentConfigStore();
 let paneCounter = 1;
 let terminalCounter = 0;
 
@@ -105,6 +120,8 @@ function saveLayout() {
     terminalState: state.terminalState,
     sidebarWidth: state.sidebarWidth,
     terminalHeight: state.terminalHeight,
+    agentWidth: state.agentWidth,
+    agentVisible: state.agentVisible,
   });
 }
 
@@ -126,6 +143,20 @@ function migrateTerminalState(saved: Record<string, unknown>): TerminalState {
     activeTerminalId: active,
     bottomPanelVisible,
   };
+}
+
+async function loadAgentConfig(rootPath: string): Promise<HarnessConfig> {
+  const local = agentConfigStore.load(rootPath);
+  try {
+    const project = parseProjectAgentConfig(await readFile(`${rootPath}/.tau/agent.json`));
+    return resolveHarness(local, project);
+  } catch (err) {
+    if (local) return local;
+    if (err instanceof Error && !err.message.includes("No such file")) {
+      console.warn("Failed to load .tau/agent.json:", err);
+    }
+    return resolveHarness(null, null);
+  }
 }
 
 function loadLayout(rootPath: string) {
@@ -189,6 +220,10 @@ async function handleOpenFolder() {
 }
 
 async function openFolder(path: string) {
+  if (state.agentSessionId) {
+    state.agentSessionId = null;
+    await layout?.updateAgent(null, state.agentConfig, null);
+  }
   state.rootPath = path;
   recentFolderStore.setLastOpenedFolder(path);
 
@@ -199,12 +234,16 @@ async function openFolder(path: string) {
     state.terminalState = saved.terminalState;
     state.sidebarWidth = saved.sidebarWidth ?? 256;
     state.terminalHeight = saved.terminalHeight ?? 192;
+    state.agentWidth = saved.agentWidth ?? 400;
+    state.agentVisible = saved.agentVisible ?? false;
   } else {
     state.editorRoot = emptyEditorPane("pane-1");
     state.activePaneId = "pane-1";
     state.terminalState = noTerminals;
     state.sidebarWidth = 256;
     state.terminalHeight = 192;
+    state.agentWidth = 400;
+    state.agentVisible = false;
     paneCounter = 1;
     terminalCounter = 0;
   }
@@ -218,6 +257,8 @@ async function openFolder(path: string) {
     return isNaN(n) ? max : Math.max(max, n);
   }, 0);
   terminalCounter = Math.max(terminalCounter, maxTerminal);
+
+  state.agentConfig = await loadAgentConfig(path);
 
   try {
     const tree = await readDir(path);
@@ -239,6 +280,9 @@ async function openFolder(path: string) {
   await refreshGitStatus();
 
   updateLayout();
+  layout?.setAgentWidth(state.agentWidth);
+  layout?.setAgentVisible(state.agentVisible);
+  await layout?.updateAgent(state.rootPath, state.agentConfig, state.agentSessionId);
 }
 
 async function refreshGitStatus() {
@@ -513,6 +557,37 @@ async function runTask(label: string) {
   await terminalInput(id, taskCommand(task) + "\n");
 }
 
+function handleAgentStart(config: HarnessConfig) {
+  if (!state.rootPath || state.agentSessionId) return;
+  state.agentConfig = config;
+  agentConfigStore.save(state.rootPath, config);
+  state.agentSessionId = `agent-${Date.now()}`;
+  state.agentVisible = true;
+  layout?.setAgentVisible(true);
+  layout?.updateAgent(state.rootPath, state.agentConfig, state.agentSessionId).catch((err) => {
+    console.error("Failed to start agent:", err);
+    state.agentSessionId = null;
+    layout?.updateAgent(state.rootPath, state.agentConfig, null);
+  });
+  saveLayout();
+}
+
+function handleAgentStop() {
+  state.agentSessionId = null;
+  layout?.updateAgent(state.rootPath, state.agentConfig, null).catch(console.error);
+}
+
+function handleAgentConfigChange(config: HarnessConfig) {
+  state.agentConfig = config;
+  if (state.rootPath) agentConfigStore.save(state.rootPath, config);
+}
+
+function handleToggleAgent() {
+  state.agentVisible = !state.agentVisible;
+  layout?.setAgentVisible(state.agentVisible);
+  saveLayout();
+}
+
 function handleNewTerminal() {
   const id = newTerminalId();
   const name = `Terminal ${
@@ -631,10 +706,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       onUnstageFile: handleUnstageFile,
       onCommit: handleCommit,
       onOpenDiffFile: handleOpenDiffFile,
+      onAgentStart: handleAgentStart,
+      onAgentStop: handleAgentStop,
+      onAgentConfigChange: handleAgentConfigChange,
+      onAgentResize: (width) => {
+        state.agentWidth = width;
+        saveLayout();
+      },
     },
     {
       sidebarWidth: state.sidebarWidth,
       terminalHeight: state.terminalHeight,
+      agentWidth: state.agentWidth,
+      agentVisible: state.agentVisible,
     }
   );
 
@@ -656,6 +740,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       handleSplit(state.activePaneId, "column")
     );
     await listen("menu-toggle-terminal", () => handleToggleTerminal());
+    await listen("menu-toggle-agent", () => handleToggleAgent());
     await listen("menu-new-terminal", () => handleNewTerminal());
     await listen("menu-kill-terminal", () => {
       if (

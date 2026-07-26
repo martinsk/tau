@@ -12,6 +12,7 @@ pub const MENU_PASTE: &str = "menu-paste";
 pub const MENU_SPLIT_HORIZONTAL: &str = "menu-split-horizontal";
 pub const MENU_SPLIT_VERTICAL: &str = "menu-split-vertical";
 pub const MENU_TOGGLE_TERMINAL: &str = "menu-toggle-terminal";
+pub const MENU_TOGGLE_AGENT: &str = "menu-toggle-agent";
 pub const MENU_NEW_TERMINAL: &str = "menu-new-terminal";
 pub const MENU_KILL_TERMINAL: &str = "menu-kill-terminal";
 pub const MENU_RUN_BUILD_TASK: &str = "menu-run-build-task";
@@ -83,6 +84,12 @@ pub fn build_menu<R: tauri::Runtime>(
                 .build(app)?,
         )
         .item(
+            &MenuItemBuilder::new("Toggle Agent")
+                .id(MENU_TOGGLE_AGENT)
+                .accelerator("CmdOrCtrl+Shift+A")
+                .build(app)?,
+        )
+        .item(
             &MenuItemBuilder::new("New Terminal")
                 .id(MENU_NEW_TERMINAL)
                 .accelerator("Ctrl+Shift+`")
@@ -141,6 +148,7 @@ pub fn handle_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: ta
         | MENU_SPLIT_HORIZONTAL
         | MENU_SPLIT_VERTICAL
         | MENU_TOGGLE_TERMINAL
+        | MENU_TOGGLE_AGENT
         | MENU_NEW_TERMINAL
         | MENU_KILL_TERMINAL
         | MENU_RUN_BUILD_TASK

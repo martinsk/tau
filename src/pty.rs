@@ -42,10 +42,58 @@ pub fn kill_terminal(
     state.kill(id)
 }
 
+#[tauri::command]
+pub fn create_agent_session(
+    id: String,
+    cwd: String,
+    program: String,
+    args: Vec<String>,
+    state: tauri::State<'_, PtyManager>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    state.create_agent(id, cwd, program, args, app)
+}
+
+#[tauri::command]
+pub fn agent_session_input(
+    id: String,
+    data: String,
+    state: tauri::State<'_, PtyManager>,
+) -> Result<(), String> {
+    state.write(id, data)
+}
+
+#[tauri::command]
+pub fn resize_agent_session(
+    id: String,
+    cols: u16,
+    rows: u16,
+    state: tauri::State<'_, PtyManager>,
+) -> Result<(), String> {
+    state.resize(id, cols, rows)
+}
+
+#[tauri::command]
+pub fn stop_agent_session(
+    id: String,
+    state: tauri::State<'_, PtyManager>,
+) -> Result<(), String> {
+    state.kill(id)
+}
+
 /// Abstraction over process spawning so the PTY manager can be tested without
 /// launching real shells.
 pub trait ProcessBackend: Send + Sync {
     fn spawn(&self, shell: &str, cwd: &str) -> Result<SpawnedProcess, String>;
+
+    fn spawn_command(
+        &self,
+        _program: &str,
+        _args: &[String],
+        _cwd: &str,
+    ) -> Result<SpawnedProcess, String> {
+        Err("direct command launching is unavailable for this process backend".into())
+    }
 }
 
 pub struct SpawnedProcess {
@@ -63,6 +111,15 @@ pub struct NativePtyBackend;
 
 impl ProcessBackend for NativePtyBackend {
     fn spawn(&self, shell: &str, cwd: &str) -> Result<SpawnedProcess, String> {
+        self.spawn_command(shell, &[], cwd)
+    }
+
+    fn spawn_command(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &str,
+    ) -> Result<SpawnedProcess, String> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -73,7 +130,8 @@ impl ProcessBackend for NativePtyBackend {
             })
             .map_err(|e| e.to_string())?;
 
-        let mut cmd = CommandBuilder::new(shell);
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
         cmd.cwd(cwd);
         let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
 
@@ -181,6 +239,67 @@ impl PtyManager {
             }
         });
 
+        self.sessions.lock().unwrap().insert(id, spawned.session);
+        Ok(())
+    }
+
+    pub fn create_agent(
+        &self,
+        id: String,
+        cwd: String,
+        program: String,
+        args: Vec<String>,
+        app: tauri::AppHandle,
+    ) -> Result<(), String> {
+        if program.trim().is_empty() {
+            return Err("agent executable cannot be empty".into());
+        }
+        let canonical_cwd = std::fs::canonicalize(&cwd)
+            .map_err(|_| "agent workspace directory does not exist".to_string())?;
+        if !canonical_cwd.is_dir() {
+            return Err("agent workspace path is not a directory".into());
+        }
+        {
+            let sessions = self.sessions.lock().unwrap();
+            if sessions.contains_key(&id) {
+                return Err("terminal already exists".into());
+            }
+        }
+        let spawned = self.backend.spawn_command(
+            &program,
+            &args,
+            &canonical_cwd.to_string_lossy(),
+        )?;
+        self.register(id, spawned, app)
+    }
+
+    fn register(
+        &self,
+        id: String,
+        spawned: SpawnedProcess,
+        app: tauri::AppHandle,
+    ) -> Result<(), String> {
+        let mut reader = spawned.reader;
+        let session_id = id.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let _ = app.emit(
+                            "terminal-output",
+                            TerminalOutput {
+                                id: session_id.clone(),
+                                data,
+                            },
+                        );
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
         self.sessions.lock().unwrap().insert(id, spawned.session);
         Ok(())
     }

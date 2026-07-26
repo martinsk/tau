@@ -73,6 +73,31 @@ export async function killTerminal(id: string): Promise<void> {
   await invoke("kill_terminal", { id });
 }
 
+export async function createAgentSession(
+  id: string,
+  cwd: string,
+  program: string,
+  args: string[]
+): Promise<void> {
+  await invoke("create_agent_session", { id, cwd, program, args });
+}
+
+export async function agentSessionInput(id: string, data: string): Promise<void> {
+  await invoke("agent_session_input", { id, data });
+}
+
+export async function resizeAgentSession(
+  id: string,
+  cols: number,
+  rows: number
+): Promise<void> {
+  await invoke("resize_agent_session", { id, cols, rows });
+}
+
+export async function stopAgentSession(id: string): Promise<void> {
+  await invoke("stop_agent_session", { id });
+}
+
 export type FileStatusKind =
   | "modified"
   | "added"
