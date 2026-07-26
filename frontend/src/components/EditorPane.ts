@@ -228,11 +228,21 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
     editor.getContainerDomNode().style.visibility = "visible";
     isSettingValue = true;
     const language = languageForFile(name);
-    const oldModel = editor.getModel();
     const uri = activePath ? monaco.Uri.file(activePath) : undefined;
-    const model = monaco.editor.createModel(content, language, uri);
-    editor.setModel(model);
-    if (oldModel) oldModel.dispose();
+    let model: monaco.editor.ITextModel | null = null;
+    if (uri) {
+      model = monaco.editor.getModel(uri);
+    }
+    if (!model) {
+      model = monaco.editor.createModel(content, language, uri);
+    } else {
+      model.setValue(content);
+    }
+    const oldModel = editor.getModel();
+    if (oldModel !== model) {
+      editor.setModel(model);
+      if (oldModel) oldModel.dispose();
+    }
     isSettingValue = false;
   }
 
