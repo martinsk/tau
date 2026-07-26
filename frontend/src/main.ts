@@ -343,7 +343,8 @@ async function handleSave(paneId: string) {
     await writeFile(tab.path, content);
     tab.content = content;
     tab.dirty = false;
-    updateLayout();
+    layout.updatePaneTabs(paneId);
+    saveLayout();
   } catch (err) {
     console.error("Failed to save file:", err);
     alert(`Failed to save file: ${err}`);
@@ -358,7 +359,7 @@ function handleContentChange(paneId: string, content: string) {
   tab.content = content;
   if (!tab.dirty) {
     tab.dirty = true;
-    updateLayout();
+    layout?.updatePaneTabs(paneId);
   }
   lspManager?.changeDocument(tab.path, content);
 }

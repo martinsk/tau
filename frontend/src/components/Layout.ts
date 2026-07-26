@@ -58,6 +58,7 @@ export interface LayoutAPI {
   element: HTMLElement;
   updateTree: (nodes: FileNode[]) => void;
   updateEditorRoot: (root: PaneNode, activePaneId: string) => void;
+  updatePaneTabs: (paneId: string) => void;
   updateTerminals: (
     visible: boolean,
     terminals: TerminalInfo[],
@@ -203,6 +204,15 @@ export function createLayout(
     statusBar.updatePath(getActivePath(root, activePaneId) ?? "Ready");
   }
 
+  function updatePaneTabs(paneId: string) {
+    if (!currentRoot) return;
+    const pane = findPane(currentRoot, paneId);
+    const api = editorPanes.get(paneId);
+    if (pane && api) {
+      api.updateTabs(pane.tabs, pane.activeTabPath);
+    }
+  }
+
   function getActivePath(root: PaneNode, activePaneId: string): string | null {
     const pane = findPane(root, activePaneId);
     return pane?.activeTabPath ?? null;
@@ -250,6 +260,7 @@ export function createLayout(
     element: wrapper,
     updateTree,
     updateEditorRoot,
+    updatePaneTabs,
     updateTerminals,
     getPaneContent,
   };

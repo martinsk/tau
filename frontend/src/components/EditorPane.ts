@@ -239,6 +239,10 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
       model.setValue(content);
     }
     const oldModel = editor.getModel();
+    if (oldModel === model && oldModel.getValue() === content) {
+      isSettingValue = false;
+      return;
+    }
     if (oldModel !== model) {
       editor.setModel(model);
       if (oldModel) oldModel.dispose();
