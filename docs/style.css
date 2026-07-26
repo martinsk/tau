@@ -56,15 +56,17 @@ a {
 .wordmark {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   font-weight: 600;
-  font-size: 1.25rem;
+  font-size: 1.375rem;
 }
 
-.wordmark-mark {
-  font-family: var(--font-mono);
-  font-size: 1.5rem;
-  line-height: 1;
+.wordmark-icon {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 .wordmark-name {

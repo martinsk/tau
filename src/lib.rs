@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod git;
 pub mod menu;
 pub mod model;
 pub mod pty;
@@ -7,6 +8,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(pty::PtyManager::default())
+        .manage(git::GitManager::default())
         .setup(|app| {
             let menu = menu::build_menu(&app.handle())?;
             app.set_menu(menu)?;
@@ -24,6 +26,14 @@ pub fn run() {
             pty::terminal_input,
             pty::terminal_resize,
             pty::kill_terminal,
+            git::git_watch_repo,
+            git::git_status,
+            git::git_diff,
+            git::git_stage,
+            git::git_unstage,
+            git::git_commit,
+            git::git_branches,
+            git::git_checkout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

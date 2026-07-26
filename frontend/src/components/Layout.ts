@@ -12,7 +12,8 @@ import {
 export type { TerminalInfo, TerminalState } from "./TerminalManager.js";
 import { createStatusBar } from "./StatusBar.js";
 import { createResizer } from "./Resizer.js";
-import type { FileNode } from "../api.js";
+import { createSourceControl } from "./SourceControl.js";
+import type { FileNode, RepoStatus } from "../api.js";
 import type { TabInfo } from "./Tabs.js";
 
 export type EmptyEditorPane = {
@@ -62,6 +63,10 @@ export interface LayoutCallbacks {
   onSwitchTerminal: (id: string) => void;
   onSidebarResize: (width: number) => void;
   onTerminalResize: (height: number) => void;
+  onStageFile: (path: string) => void;
+  onUnstageFile: (path: string) => void;
+  onCommit: (message: string) => void;
+  onOpenDiffFile: (path: string) => void;
 }
 
 export interface LayoutAPI {
@@ -71,6 +76,8 @@ export interface LayoutAPI {
   updatePaneTabs: (paneId: string) => void;
   updateTerminals: (state: TerminalState) => void;
   getPaneContent: (paneId: string) => string;
+  updateGitStatus: (status: RepoStatus | null) => void;
+  showDiff: (path: string, diff: string) => void;
 }
 
 export function createLayout(
@@ -87,19 +94,87 @@ export function createLayout(
 
   const activityBar = document.createElement("div");
   activityBar.className =
-    "w-12 bg-tau-bg border-r border-tau-border flex flex-col items-center py-2 select-none text-tau-muted";
-  activityBar.textContent = "τ";
+    "w-12 bg-tau-bg border-r border-tau-border flex flex-col items-center py-2 gap-1 select-none text-tau-muted";
+
+  const brand = document.createElement("div");
+  brand.className = "text-tau-accent font-bold mb-2";
+  brand.textContent = "τ";
+  activityBar.appendChild(brand);
+
+  const explorerButton = document.createElement("button");
+  explorerButton.className =
+    "w-8 h-8 flex items-center justify-center rounded hover:bg-tau-active-hover text-lg";
+  explorerButton.title = "Explorer";
+  explorerButton.textContent = "▤";
+  activityBar.appendChild(explorerButton);
+
+  const sourceControlWrapper = document.createElement("div");
+  sourceControlWrapper.className = "relative";
+  const sourceControlButton = document.createElement("button");
+  sourceControlButton.className =
+    "w-8 h-8 flex items-center justify-center rounded hover:bg-tau-active-hover text-lg";
+  sourceControlButton.title = "Source Control";
+  sourceControlButton.textContent = "⎇";
+  sourceControlWrapper.appendChild(sourceControlButton);
+
+  const changeBadge = document.createElement("span");
+  changeBadge.className =
+    "absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full bg-tau-accent text-[9px] leading-[14px] text-tau-bg text-center hidden";
+  sourceControlWrapper.appendChild(changeBadge);
+  activityBar.appendChild(sourceControlWrapper);
 
   const sidebar = createSidebar(callbacks.onOpenFolder, callbacks.onFileClick);
+  const sourceControl = createSourceControl({
+    onStage: (path) => callbacks.onStageFile(path),
+    onUnstage: (path) => callbacks.onUnstageFile(path),
+    onCommit: (message) => callbacks.onCommit(message),
+    onOpenFile: (path) => callbacks.onOpenDiffFile(path),
+  });
+
+  const sidebarContainer = document.createElement("div");
+  sidebarContainer.className =
+    "flex flex-col border-r border-tau-border overflow-hidden";
   const sidebarWidth = Math.max(160, options.sidebarWidth ?? 256);
-  sidebar.element.style.width = `${sidebarWidth}px`;
-  sidebar.element.classList.remove("w-64");
+  sidebarContainer.style.width = `${sidebarWidth}px`;
+  sidebar.element.classList.remove("w-64", "border-r", "border-tau-border");
+  sidebar.element.classList.add("h-full", "w-full");
+  sourceControl.element.classList.add("h-full", "w-full");
+  sidebarContainer.appendChild(sidebar.element);
+  sidebarContainer.appendChild(sourceControl.element);
+
+  let activityView: "explorer" | "source-control" = "explorer";
+  function updateActivityView() {
+    sidebar.element.classList.toggle("hidden", activityView !== "explorer");
+    sourceControl.element.classList.toggle(
+      "hidden",
+      activityView !== "source-control"
+    );
+    explorerButton.classList.toggle("bg-tau-active", activityView === "explorer");
+    explorerButton.classList.toggle("text-tau-fg", activityView === "explorer");
+    sourceControlButton.classList.toggle(
+      "bg-tau-active",
+      activityView === "source-control"
+    );
+    sourceControlButton.classList.toggle(
+      "text-tau-fg",
+      activityView === "source-control"
+    );
+  }
+  explorerButton.addEventListener("click", () => {
+    activityView = "explorer";
+    updateActivityView();
+  });
+  sourceControlButton.addEventListener("click", () => {
+    activityView = "source-control";
+    updateActivityView();
+  });
+  updateActivityView();
 
   const sidebarResizer = createResizer({
     direction: "row",
     onChange(delta) {
-      const next = Math.max(160, sidebar.element.offsetWidth + delta);
-      sidebar.element.style.width = `${next}px`;
+      const next = Math.max(160, sidebarContainer.offsetWidth + delta);
+      sidebarContainer.style.width = `${next}px`;
       callbacks.onSidebarResize(next);
     },
   });
@@ -134,7 +209,7 @@ export function createLayout(
   mainArea.appendChild(terminalManager.element);
 
   workspace.appendChild(activityBar);
-  workspace.appendChild(sidebar.element);
+  workspace.appendChild(sidebarContainer);
   workspace.appendChild(sidebarResizer.element);
   workspace.appendChild(mainArea);
 
@@ -267,6 +342,27 @@ export function createLayout(
     sidebar.updateTree(nodes);
   }
 
+  function updateGitStatus(status: RepoStatus | null) {
+    sidebar.updateGitStatus(status);
+    sourceControl.update(status);
+    statusBar.updateBranch(
+      status && status.is_repo ? status.branch : null,
+      status?.ahead ?? 0,
+      status?.behind ?? 0
+    );
+    const count = status?.files.length ?? 0;
+    changeBadge.textContent = String(count);
+    changeBadge.classList.toggle("hidden", count === 0);
+  }
+
+  function showDiff(path: string, diff: string) {
+    sourceControl.showDiff(path, diff);
+    if (activityView !== "source-control") {
+      activityView = "source-control";
+      updateActivityView();
+    }
+  }
+
   return {
     element: wrapper,
     updateTree,
@@ -274,5 +370,7 @@ export function createLayout(
     updatePaneTabs,
     updateTerminals,
     getPaneContent,
+    updateGitStatus,
+    showDiff,
   };
 }

@@ -72,3 +72,93 @@ export async function terminalResize(
 export async function killTerminal(id: string): Promise<void> {
   await invoke("kill_terminal", { id });
 }
+
+export type FileStatusKind =
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "untracked"
+  | "conflicted"
+  | "type_changed";
+
+export interface FileStatus {
+  path: string;
+  staged: FileStatusKind | null;
+  unstaged: FileStatusKind | null;
+}
+
+export interface RepoStatus {
+  is_repo: boolean;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  files: FileStatus[];
+}
+
+export interface GitBranch {
+  name: string;
+  is_head: boolean;
+  is_remote: boolean;
+}
+
+/**
+ * Starts watching a folder for Git changes. Emits `git-status-changed`
+ * events (immediately, and whenever the working tree changes) if the folder
+ * is a Git repository. Safe to call on non-repositories.
+ */
+export async function gitWatchRepo(rootPath: string): Promise<void> {
+  await invoke("git_watch_repo", { rootPath });
+}
+
+/**
+ * Returns the current branch, ahead/behind counts, and per-file status.
+ */
+export async function gitStatus(rootPath: string): Promise<RepoStatus> {
+  return await invoke<RepoStatus>("git_status", { rootPath });
+}
+
+/**
+ * Returns a unified diff for a single file, or the whole repo if omitted.
+ */
+export async function gitDiff(
+  rootPath: string,
+  filePath?: string
+): Promise<string> {
+  return await invoke<string>("git_diff", { rootPath, filePath });
+}
+
+/**
+ * Stages a file (adds working-tree changes, including new files, to the index).
+ */
+export async function gitStage(rootPath: string, filePath: string): Promise<void> {
+  await invoke("git_stage", { rootPath, filePath });
+}
+
+/**
+ * Unstages a file (reverts the index entry to HEAD).
+ */
+export async function gitUnstage(rootPath: string, filePath: string): Promise<void> {
+  await invoke("git_unstage", { rootPath, filePath });
+}
+
+/**
+ * Commits all staged changes with the given message.
+ */
+export async function gitCommit(rootPath: string, message: string): Promise<void> {
+  await invoke("git_commit", { rootPath, message });
+}
+
+/**
+ * Lists local and remote branches.
+ */
+export async function gitBranches(rootPath: string): Promise<GitBranch[]> {
+  return await invoke<GitBranch[]>("git_branches", { rootPath });
+}
+
+/**
+ * Checks out a branch by name.
+ */
+export async function gitCheckout(rootPath: string, branchName: string): Promise<void> {
+  await invoke("git_checkout", { rootPath, branchName });
+}

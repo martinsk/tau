@@ -1,10 +1,34 @@
-import { readDir, type FileNode } from "../api.js";
+import { readDir, type FileNode, type RepoStatus, type FileStatusKind } from "../api.js";
 import { setDrag, clearDrag } from "../dragState.js";
 import { getFileIcon } from "../fileIcons.js";
 
 export interface SidebarAPI {
   element: HTMLElement;
   updateTree: (nodes: FileNode[]) => void;
+  updateGitStatus: (status: RepoStatus | null) => void;
+}
+
+const STATUS_LABEL: Record<FileStatusKind, string> = {
+  modified: "M",
+  added: "A",
+  deleted: "D",
+  renamed: "R",
+  untracked: "U",
+  conflicted: "C",
+  type_changed: "T",
+};
+
+function badgeInfo(
+  staged: FileStatusKind | null,
+  unstaged: FileStatusKind | null
+): { text: string; className: string } | null {
+  const kind = unstaged ?? staged;
+  if (!kind) return null;
+  const isStagedOnly = !unstaged && !!staged;
+  return {
+    text: STATUS_LABEL[kind],
+    className: isStagedOnly ? "text-green-400" : "text-tau-accent",
+  };
 }
 
 /**
@@ -35,6 +59,16 @@ export function createSidebar(
 
   sidebar.appendChild(header);
   sidebar.appendChild(tree);
+
+  let currentStatus = new Map<string, { staged: FileStatusKind | null; unstaged: FileStatusKind | null }>();
+  const badgeEls = new Map<string, HTMLElement>();
+
+  function applyBadge(path: string, badge: HTMLElement) {
+    const entry = currentStatus.get(path);
+    const info = entry ? badgeInfo(entry.staged, entry.unstaged) : null;
+    badge.textContent = info?.text ?? "";
+    badge.className = `text-[10px] font-bold w-3 text-center shrink-0 ${info?.className ?? ""}`;
+  }
 
   function renderDirectory(
     node: FileNode,
@@ -111,8 +145,15 @@ export function createSidebar(
     icon.innerHTML = getFileIcon(node.name, false, false);
     const name = document.createElement("span");
     name.textContent = node.name;
+    name.className = "truncate flex-1";
     row.appendChild(icon);
     row.appendChild(name);
+
+    const badge = document.createElement("span");
+    badgeEls.set(node.path, badge);
+    applyBadge(node.path, badge);
+    row.appendChild(badge);
+
     row.draggable = true;
     row.addEventListener("dragstart", (e) => {
       const data = JSON.stringify({ path: node.path, name: node.name });
@@ -138,10 +179,23 @@ export function createSidebar(
 
   function updateTree(nodes: FileNode[]) {
     tree.innerHTML = "";
+    badgeEls.clear();
     for (const node of nodes) {
       renderNode(node, 0, tree);
     }
   }
 
-  return { element: sidebar, updateTree };
+  function updateGitStatus(status: RepoStatus | null) {
+    currentStatus = new Map(
+      (status?.files ?? []).map((f) => [
+        f.path,
+        { staged: f.staged, unstaged: f.unstaged },
+      ])
+    );
+    for (const [path, badge] of badgeEls) {
+      applyBadge(path, badge);
+    }
+  }
+
+  return { element: sidebar, updateTree, updateGitStatus };
 }

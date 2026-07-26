@@ -4,7 +4,14 @@ import {
   readFile,
   writeFile,
   terminalInput,
+  gitWatchRepo,
+  gitStatus as fetchGitStatus,
+  gitStage,
+  gitUnstage,
+  gitCommit,
+  gitDiff,
   type FileNode,
+  type RepoStatus,
 } from "./api.js";
 import {
   createLayout,
@@ -60,6 +67,7 @@ interface AppState {
   terminalState: TerminalState;
   sidebarWidth: number;
   terminalHeight: number;
+  gitStatus: RepoStatus | null;
 }
 
 const state: AppState = {
@@ -69,6 +77,7 @@ const state: AppState = {
   terminalState: noTerminals,
   sidebarWidth: 256,
   terminalHeight: 192,
+  gitStatus: null,
 };
 
 let layout: LayoutAPI | null = null;
@@ -224,7 +233,71 @@ async function openFolder(path: string) {
     lspManager?.registerLanguageFeatures();
   });
 
+  gitWatchRepo(path).catch((err) => {
+    console.error("Failed to watch git repository:", err);
+  });
+  await refreshGitStatus();
+
   updateLayout();
+}
+
+async function refreshGitStatus() {
+  if (!state.rootPath) {
+    state.gitStatus = null;
+    layout?.updateGitStatus(null);
+    return;
+  }
+  try {
+    state.gitStatus = await fetchGitStatus(state.rootPath);
+  } catch (err) {
+    console.error("Failed to load git status:", err);
+    state.gitStatus = null;
+  }
+  layout?.updateGitStatus(state.gitStatus);
+}
+
+async function handleStageFile(path: string) {
+  if (!state.rootPath) return;
+  try {
+    await gitStage(state.rootPath, path);
+    await refreshGitStatus();
+  } catch (err) {
+    console.error("Failed to stage file:", err);
+    alert(`Failed to stage file: ${err}`);
+  }
+}
+
+async function handleUnstageFile(path: string) {
+  if (!state.rootPath) return;
+  try {
+    await gitUnstage(state.rootPath, path);
+    await refreshGitStatus();
+  } catch (err) {
+    console.error("Failed to unstage file:", err);
+    alert(`Failed to unstage file: ${err}`);
+  }
+}
+
+async function handleCommit(message: string) {
+  if (!state.rootPath) return;
+  try {
+    await gitCommit(state.rootPath, message);
+    await refreshGitStatus();
+  } catch (err) {
+    console.error("Failed to commit:", err);
+    alert(`Failed to commit: ${err}`);
+  }
+}
+
+async function handleOpenDiffFile(path: string) {
+  if (!state.rootPath) return;
+  try {
+    const diff = await gitDiff(state.rootPath, path);
+    layout?.showDiff(path, diff);
+  } catch (err) {
+    console.error("Failed to load diff:", err);
+    alert(`Failed to load diff: ${err}`);
+  }
 }
 
 function getActivePane(): EditorPane {
@@ -366,6 +439,7 @@ async function handleSave(paneId: string) {
     tab.dirty = false;
     layout.updatePaneTabs(paneId);
     saveLayout();
+    refreshGitStatus();
   } catch (err) {
     console.error("Failed to save file:", err);
     alert(`Failed to save file: ${err}`);
@@ -553,6 +627,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         state.terminalHeight = height;
         saveLayout();
       },
+      onStageFile: handleStageFile,
+      onUnstageFile: handleUnstageFile,
+      onCommit: handleCommit,
+      onOpenDiffFile: handleOpenDiffFile,
     },
     {
       sidebarWidth: state.sidebarWidth,
@@ -589,6 +667,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
     await listen("menu-run-build-task", () => runTask("build"));
     await listen("menu-run-test-task", () => runTask("test"));
+    await listen<{ root_path: string }>("git-status-changed", (event) => {
+      if (event.payload.root_path === state.rootPath) {
+        refreshGitStatus();
+      }
+    });
   } catch {
     // Tauri event listening is unavailable in browser dev server.
   }
