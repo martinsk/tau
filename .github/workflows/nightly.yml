@@ -51,13 +51,26 @@ jobs:
       - name: Build Tauri app
         run: npm run build -- --target ${{ matrix.target }}
 
+      - name: Locate bundle directory
+        shell: bash
+        id: locate
+        run: |
+          BUNDLE_DIR=$(find target -type d -name bundle | head -n 1)
+          if [ -z "$BUNDLE_DIR" ]; then
+            echo "No bundle directory found. Existing target directories:"
+            find target -maxdepth 3 -type d || true
+            exit 1
+          fi
+          echo "bundle=$BUNDLE_DIR" >> "$GITHUB_OUTPUT"
+
       - name: Package bundle
         shell: bash
         run: |
+          BUNDLE_DIR="${{ steps.locate.outputs.bundle }}"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            powershell -Command "Compress-Archive -Path target/${{ matrix.target }}/release/bundle -DestinationPath tau-${{ matrix.artifact }}.zip"
+            powershell -Command "Compress-Archive -Path '$BUNDLE_DIR' -DestinationPath tau-${{ matrix.artifact }}.zip"
           else
-            zip -r tau-${{ matrix.artifact }}.zip target/${{ matrix.target }}/release/bundle
+            zip -r tau-${{ matrix.artifact }}.zip "$BUNDLE_DIR"
           fi
 
       - name: Upload artifact
