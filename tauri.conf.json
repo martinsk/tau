@@ -9,6 +9,13 @@
     "beforeDevCommand": "npm run --prefix frontend dev",
     "beforeBuildCommand": "npm run --prefix frontend build"
   },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ]
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
