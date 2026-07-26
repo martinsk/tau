@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tau — A simple editor, built to explore</title>
+    <meta
+      name="description"
+      content="Tau is a proof-of-concept code editor built with Rust and Tauri."
+    />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <a href="/" class="wordmark" aria-label="Tau home">
+          <span class="wordmark-mark">τ</span>
+          <span class="wordmark-name">tau</span>
+        </a>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="container">
+          <h1>A simple editor, built to explore.</h1>
+          <p class="lead">
+            Tau is a proof-of-concept desktop code editor. It lets you browse a
+            project, open files in tabs, edit with Monaco, and run commands in
+            an integrated terminal.
+          </p>
+          <a
+            href="https://github.com/martinsk/tau"
+            class="button"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <h2>What it does</h2>
+          <ul class="feature-list">
+            <li>Browse files in a sidebar explorer.</li>
+            <li>Open files in tabs and split panes.</li>
+            <li>Edit code with syntax highlighting and LSP support.</li>
+            <li>Run shell tasks in a built-in terminal panel.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <h2>Current interface</h2>
+          <figure class="screenshot">
+            <img
+              src="tau-screenshot.png"
+              alt="The Tau editor with a file tree, open tabs, code editing, and a terminal panel."
+              width="1200"
+              height="750"
+              loading="lazy"
+            />
+            <figcaption>A screenshot of the current Tau interface.</figcaption>
+          </figure>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p class="footer-line">
+          <a
+            href="https://github.com/martinsk/tau"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            github.com/martinsk/tau
+          </a>
+          <span class="footer-separator">·</span>
+          <span>by Martin Kristiansen</span>
+          <span class="footer-separator">·</span>
+          <a
+            href="https://www.linkedin.com/in/martinskristiansen"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            LinkedIn
+          </a>
+        </p>
+        <p class="footer-line footer-line--subtle">proof of concept</p>
+      </div>
+    </footer>
+  </body>
+</html>
