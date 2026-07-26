@@ -14,6 +14,8 @@ pub const MENU_SPLIT_VERTICAL: &str = "menu-split-vertical";
 pub const MENU_TOGGLE_TERMINAL: &str = "menu-toggle-terminal";
 pub const MENU_NEW_TERMINAL: &str = "menu-new-terminal";
 pub const MENU_KILL_TERMINAL: &str = "menu-kill-terminal";
+pub const MENU_RUN_BUILD_TASK: &str = "menu-run-build-task";
+pub const MENU_RUN_TEST_TASK: &str = "menu-run-test-task";
 pub const MENU_MINIMIZE: &str = "menu-minimize";
 pub const MENU_TOGGLE_FULLSCREEN: &str = "menu-toggle-fullscreen";
 
@@ -94,6 +96,21 @@ pub fn build_menu<R: tauri::Runtime>(
         )
         .build()?;
 
+    let run = SubmenuBuilder::new(app, "Run")
+        .item(
+            &MenuItemBuilder::new("Run Build Task")
+                .id(MENU_RUN_BUILD_TASK)
+                .accelerator("CmdOrCtrl+Shift+B")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::new("Run Test Task")
+                .id(MENU_RUN_TEST_TASK)
+                .accelerator("CmdOrCtrl+Shift+T")
+                .build(app)?,
+        )
+        .build()?;
+
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .close_window()
@@ -105,6 +122,7 @@ pub fn build_menu<R: tauri::Runtime>(
         .item(&file)
         .item(&edit)
         .item(&view)
+        .item(&run)
         .item(&window)
         .build()
 }
@@ -124,7 +142,9 @@ pub fn handle_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: ta
         | MENU_SPLIT_VERTICAL
         | MENU_TOGGLE_TERMINAL
         | MENU_NEW_TERMINAL
-        | MENU_KILL_TERMINAL => {
+        | MENU_KILL_TERMINAL
+        | MENU_RUN_BUILD_TASK
+        | MENU_RUN_TEST_TASK => {
             let _ = app.emit(id, ());
         }
         _ => {}

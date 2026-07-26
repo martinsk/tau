@@ -10,6 +10,7 @@ import {
 } from "./TerminalManager.js";
 export type { TerminalInfo } from "./TerminalManager.js";
 import { createStatusBar } from "./StatusBar.js";
+import { createResizer } from "./Resizer.js";
 import type { FileNode } from "../api.js";
 import type { TabInfo } from "./Tabs.js";
 
@@ -49,6 +50,8 @@ export interface LayoutCallbacks {
   onNewTerminal: () => void;
   onCloseTerminal: (id: string) => void;
   onSwitchTerminal: (id: string) => void;
+  onSidebarResize: (width: number) => void;
+  onTerminalResize: (height: number) => void;
 }
 
 export interface LayoutAPI {
@@ -63,7 +66,10 @@ export interface LayoutAPI {
   getPaneContent: (paneId: string) => string;
 }
 
-export function createLayout(callbacks: LayoutCallbacks): LayoutAPI {
+export function createLayout(
+  callbacks: LayoutCallbacks,
+  options: { sidebarWidth?: number; terminalHeight?: number } = {}
+): LayoutAPI {
   const wrapper = document.createElement("div");
   wrapper.className = "flex flex-col h-screen w-screen overflow-hidden bg-tau-bg";
 
@@ -78,6 +84,18 @@ export function createLayout(callbacks: LayoutCallbacks): LayoutAPI {
   activityBar.textContent = "τ";
 
   const sidebar = createSidebar(callbacks.onOpenFolder, callbacks.onFileClick);
+  const sidebarWidth = Math.max(160, options.sidebarWidth ?? 256);
+  sidebar.element.style.width = `${sidebarWidth}px`;
+  sidebar.element.classList.remove("w-64");
+
+  const sidebarResizer = createResizer({
+    direction: "row",
+    onChange(delta) {
+      const next = Math.max(160, sidebar.element.offsetWidth + delta);
+      sidebar.element.style.width = `${next}px`;
+      callbacks.onSidebarResize(next);
+    },
+  });
 
   const mainArea = document.createElement("div");
   mainArea.className = "flex flex-1 flex-col min-w-0";
@@ -90,12 +108,27 @@ export function createLayout(callbacks: LayoutCallbacks): LayoutAPI {
     onCloseTerminal: (id: string) => callbacks.onCloseTerminal(id),
     onSwitchTerminal: (id: string) => callbacks.onSwitchTerminal(id),
   });
+  const terminalHeight = Math.max(120, options.terminalHeight ?? 192);
+  terminalManager.element.style.height = `${terminalHeight}px`;
+  terminalManager.element.classList.remove("h-48");
+
+  const terminalResizer = createResizer({
+    direction: "column",
+    onChange(delta) {
+      const next = Math.max(120, terminalManager.element.offsetHeight + delta);
+      terminalManager.element.style.height = `${next}px`;
+      callbacks.onTerminalResize(next);
+      terminalManager.fitActive();
+    },
+  });
 
   mainArea.appendChild(editorContainer);
+  mainArea.appendChild(terminalResizer.element);
   mainArea.appendChild(terminalManager.element);
 
   workspace.appendChild(activityBar);
   workspace.appendChild(sidebar.element);
+  workspace.appendChild(sidebarResizer.element);
   workspace.appendChild(mainArea);
 
   wrapper.appendChild(titleBar.element);

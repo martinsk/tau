@@ -270,7 +270,6 @@ mod tests {
     }
 
     struct FakeProcessBackend {
-        tx: std::sync::mpsc::Sender<Vec<u8>>,
         rx: Mutex<Option<std::sync::mpsc::Receiver<Vec<u8>>>>,
         input: Arc<Mutex<Vec<u8>>>,
         killed: Arc<Mutex<bool>>,
@@ -282,13 +281,11 @@ mod tests {
             let input = Arc::new(Mutex::new(Vec::new()));
             let killed = Arc::new(Mutex::new(false));
             let handle = FakeProcessHandle {
-                tx: tx.clone(),
+                tx,
                 input: input.clone(),
-                killed: killed.clone(),
             };
             (
                 Self {
-                    tx,
                     rx: Mutex::new(Some(rx)),
                     input,
                     killed,
@@ -324,7 +321,6 @@ mod tests {
     struct FakeProcessHandle {
         tx: std::sync::mpsc::Sender<Vec<u8>>,
         input: Arc<Mutex<Vec<u8>>>,
-        killed: Arc<Mutex<bool>>,
     }
 
     impl FakeProcessHandle {
@@ -334,10 +330,6 @@ mod tests {
 
         fn input(&self) -> Vec<u8> {
             self.input.lock().unwrap().clone()
-        }
-
-        fn killed(&self) -> bool {
-            *self.killed.lock().unwrap()
         }
     }
 

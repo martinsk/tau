@@ -3,6 +3,7 @@ import {
   readDir,
   readFile,
   writeFile,
+  terminalInput,
   type FileNode,
 } from "./api.js";
 import {
@@ -28,6 +29,17 @@ import {
 } from "./editorTree.js";
 import { createTerminal, closeTerminal, switchTerminal } from "./terminalState.js";
 import { createLocalLayoutStorage, type LayoutStorage } from "./layoutStorage.js";
+import {
+  createLocalRecentFolderStore,
+  type RecentFolderStore,
+} from "./appStorage.js";
+import {
+  loadTasks,
+  findDefaultTask,
+  findTaskByLabel,
+  taskCommand,
+} from "./tasks.js";
+import { LspManager } from "./lsp.js";
 
 interface AppState {
   rootPath: string | null;
@@ -36,6 +48,8 @@ interface AppState {
   bottomPanelVisible: boolean;
   terminals: TerminalInfo[];
   activeTerminalId: string | null;
+  sidebarWidth: number;
+  terminalHeight: number;
 }
 
 const state: AppState = {
@@ -50,10 +64,14 @@ const state: AppState = {
   bottomPanelVisible: false,
   terminals: [],
   activeTerminalId: null,
+  sidebarWidth: 256,
+  terminalHeight: 192,
 };
 
 let layout: LayoutAPI | null = null;
+let lspManager: LspManager | null = null;
 const layoutStorage: LayoutStorage = createLocalLayoutStorage();
+const recentFolderStore: RecentFolderStore = createLocalRecentFolderStore();
 let paneCounter = 1;
 let terminalCounter = 0;
 
@@ -75,6 +93,8 @@ function saveLayout() {
     bottomPanelVisible: state.bottomPanelVisible,
     terminals: state.terminals,
     activeTerminalId: state.activeTerminalId,
+    sidebarWidth: state.sidebarWidth,
+    terminalHeight: state.terminalHeight,
   });
 }
 
@@ -126,8 +146,12 @@ async function handleOpenFolder() {
     return;
   }
   if (!path) return;
+  await openFolder(path);
+}
 
+async function openFolder(path: string) {
   state.rootPath = path;
+  recentFolderStore.setLastOpenedFolder(path);
 
   const saved = loadLayout(path);
   if (saved) {
@@ -136,6 +160,8 @@ async function handleOpenFolder() {
     state.bottomPanelVisible = saved.bottomPanelVisible;
     state.terminals = saved.terminals;
     state.activeTerminalId = saved.activeTerminalId;
+    state.sidebarWidth = saved.sidebarWidth ?? 256;
+    state.terminalHeight = saved.terminalHeight ?? 192;
   } else {
     state.editorRoot = {
       type: "editor",
@@ -147,6 +173,8 @@ async function handleOpenFolder() {
     state.bottomPanelVisible = false;
     state.terminals = [];
     state.activeTerminalId = null;
+    state.sidebarWidth = 256;
+    state.terminalHeight = 192;
     paneCounter = 1;
     terminalCounter = 0;
   }
@@ -164,6 +192,12 @@ async function handleOpenFolder() {
     console.error("Failed to read root directory:", err);
     alert(`Failed to read root directory: ${err}`);
   }
+
+  lspManager?.stop();
+  lspManager = new LspManager(path);
+  lspManager.loadSettings().then(() => {
+    lspManager?.registerLanguageFeatures();
+  });
 
   updateLayout();
 }
@@ -187,10 +221,28 @@ async function handleFileClick(path: string, name: string) {
     const content = await readFile(path);
     pane.tabs.push({ path, name, content, dirty: false });
     pane.activeTabPath = path;
+    lspManager?.openDocument(path, languageForFile(name), content);
     updateLayout();
   } catch (err) {
     console.error("Failed to read file:", err);
     alert(`Failed to read file: ${err}`);
+  }
+}
+
+function languageForFile(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "rs":
+      return "rust";
+    case "c":
+    case "h":
+      return "c";
+    case "cpp":
+    case "cc":
+    case "hpp":
+      return "cpp";
+    default:
+      return ext;
   }
 }
 
@@ -308,6 +360,7 @@ function handleContentChange(paneId: string, content: string) {
     tab.dirty = true;
     updateLayout();
   }
+  lspManager?.changeDocument(tab.path, content);
 }
 
 function handleTabDrop(targetPaneId: string, tabJson: string) {
@@ -341,6 +394,39 @@ function handleToggleTerminal() {
     return;
   }
   updateLayout();
+}
+
+function addTaskTerminal(name: string, cwd: string): string {
+  const id = newTerminalId();
+  const next = createTerminal(
+    {
+      terminals: state.terminals,
+      activeTerminalId: state.activeTerminalId,
+      bottomPanelVisible: state.bottomPanelVisible,
+    },
+    id,
+    name,
+    cwd
+  );
+  state.terminals = next.terminals;
+  state.activeTerminalId = next.activeTerminalId;
+  state.bottomPanelVisible = next.bottomPanelVisible;
+  updateLayout();
+  return id;
+}
+
+async function runTask(label: string) {
+  if (!state.rootPath) return;
+  const tasks = await loadTasks(state.rootPath);
+  const task = findTaskByLabel(tasks, label) ?? findDefaultTask(tasks, "build");
+  if (!task) {
+    console.warn(`Task "${label}" not found`);
+    return;
+  }
+  const id = addTaskTerminal(task.label, task.options?.cwd ?? state.rootPath);
+  // Wait a tick so the shell prompt is ready.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await terminalInput(id, taskCommand(task) + "\n");
 }
 
 function handleNewTerminal() {
@@ -451,23 +537,37 @@ document.addEventListener("DOMContentLoaded", async () => {
     throw new Error("missing #app mount point");
   }
 
-  layout = createLayout({
-    onOpenFolder: handleOpenFolder,
-    onFileClick: handleFileClick,
-    onTabClick: handleTabClick,
-    onTabClose: handleTabClose,
-    onTabDrop: handleTabDrop,
-    onFileDrop: handleFileDrop,
-    onSplit: handleSplit,
-    onSplitDrop: handleSplitDrop,
-    onSave: handleSave,
-    onContentChange: handleContentChange,
-    onPaneFocus: handlePaneFocus,
-    onToggleTerminal: handleToggleTerminal,
-    onNewTerminal: handleNewTerminal,
-    onCloseTerminal: handleCloseTerminal,
-    onSwitchTerminal: handleSwitchTerminal,
-  });
+  layout = createLayout(
+    {
+      onOpenFolder: handleOpenFolder,
+      onFileClick: handleFileClick,
+      onTabClick: handleTabClick,
+      onTabClose: handleTabClose,
+      onTabDrop: handleTabDrop,
+      onFileDrop: handleFileDrop,
+      onSplit: handleSplit,
+      onSplitDrop: handleSplitDrop,
+      onSave: handleSave,
+      onContentChange: handleContentChange,
+      onPaneFocus: handlePaneFocus,
+      onToggleTerminal: handleToggleTerminal,
+      onNewTerminal: handleNewTerminal,
+      onCloseTerminal: handleCloseTerminal,
+      onSwitchTerminal: handleSwitchTerminal,
+      onSidebarResize: (width) => {
+        state.sidebarWidth = width;
+        saveLayout();
+      },
+      onTerminalResize: (height) => {
+        state.terminalHeight = height;
+        saveLayout();
+      },
+    },
+    {
+      sidebarWidth: state.sidebarWidth,
+      terminalHeight: state.terminalHeight,
+    }
+  );
 
   app.appendChild(layout.element);
 
@@ -493,7 +593,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         handleCloseTerminal(state.activeTerminalId);
       }
     });
+    await listen("menu-run-build-task", () => runTask("build"));
+    await listen("menu-run-test-task", () => runTask("test"));
   } catch {
     // Tauri event listening is unavailable in browser dev server.
+  }
+
+  const lastFolder = recentFolderStore.getLastOpenedFolder();
+  if (lastFolder) {
+    openFolder(lastFolder).catch((err) => {
+      console.error("Failed to reopen last folder:", err);
+      recentFolderStore.setLastOpenedFolder(null);
+    });
   }
 });

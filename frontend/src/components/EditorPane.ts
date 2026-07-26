@@ -229,7 +229,8 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
     isSettingValue = true;
     const language = languageForFile(name);
     const oldModel = editor.getModel();
-    const model = monaco.editor.createModel(content, language);
+    const uri = activePath ? monaco.Uri.file(activePath) : undefined;
+    const model = monaco.editor.createModel(content, language, uri);
     editor.setModel(model);
     if (oldModel) oldModel.dispose();
     isSettingValue = false;

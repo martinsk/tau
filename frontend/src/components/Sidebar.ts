@@ -1,5 +1,6 @@
 import { readDir, type FileNode } from "../api.js";
 import { setDrag, clearDrag } from "../dragState.js";
+import { getFileIcon } from "../fileIcons.js";
 
 export interface SidebarAPI {
   element: HTMLElement;
@@ -51,7 +52,8 @@ export function createSidebar(
     arrow.className = "w-4 inline-block text-center text-tau-muted text-[10px] transition-transform duration-150";
 
     const icon = document.createElement("span");
-    icon.textContent = "📁";
+    icon.className = "shrink-0 w-4 h-4 flex items-center justify-center";
+    icon.innerHTML = getFileIcon(node.name, true, false);
 
     const name = document.createElement("span");
     name.textContent = node.name;
@@ -66,8 +68,13 @@ export function createSidebar(
     let expanded = false;
     let loaded = false;
 
+    function updateIcon() {
+      icon.innerHTML = getFileIcon(node.name, true, expanded);
+    }
+
     row.addEventListener("click", async () => {
       expanded = !expanded;
+      updateIcon();
       if (expanded) {
         arrow.style.transform = "rotate(90deg)";
         childrenContainer.style.display = "block";
@@ -98,7 +105,14 @@ export function createSidebar(
       "py-1 px-2 hover:bg-tau-active-hover cursor-pointer flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis";
     row.style.paddingLeft = `${depth * 12 + 8}px`;
     row.title = node.path;
-    row.textContent = `📄 ${node.name}`;
+    row.innerHTML = "";
+    const icon = document.createElement("span");
+    icon.className = "shrink-0 w-4 h-4 flex items-center justify-center";
+    icon.innerHTML = getFileIcon(node.name, false, false);
+    const name = document.createElement("span");
+    name.textContent = node.name;
+    row.appendChild(icon);
+    row.appendChild(name);
     row.draggable = true;
     row.addEventListener("dragstart", (e) => {
       const data = JSON.stringify({ path: node.path, name: node.name });

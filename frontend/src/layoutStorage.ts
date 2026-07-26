@@ -7,6 +7,8 @@ export interface SavedLayout {
   bottomPanelVisible: boolean;
   terminals: TerminalInfo[];
   activeTerminalId: string | null;
+  sidebarWidth?: number;
+  terminalHeight?: number;
 }
 
 export interface LayoutStorage {
