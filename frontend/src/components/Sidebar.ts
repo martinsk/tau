@@ -86,7 +86,7 @@ export function createSidebar(
     arrow.className = "w-4 inline-block text-center text-tau-muted text-[10px] transition-transform duration-150";
 
     const icon = document.createElement("span");
-    icon.className = "shrink-0 w-4 h-4 flex items-center justify-center";
+    icon.className = "shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full";
     icon.innerHTML = getFileIcon(node.name, true, false);
 
     const name = document.createElement("span");
@@ -141,7 +141,7 @@ export function createSidebar(
     row.title = node.path;
     row.innerHTML = "";
     const icon = document.createElement("span");
-    icon.className = "shrink-0 w-4 h-4 flex items-center justify-center";
+    icon.className = "shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full";
     icon.innerHTML = getFileIcon(node.name, false, false);
     const name = document.createElement("span");
     name.textContent = node.name;

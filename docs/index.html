@@ -21,7 +21,7 @@
     <header class="site-header">
       <div class="container">
         <a href="/" class="wordmark" aria-label="Tau home">
-          <img class="wordmark-icon" src="favicon.png" alt="" width="40" height="40" />
+          <img class="wordmark-icon" src="favicon.png" alt="" width="28" height="28" />
           <span class="wordmark-name">tau</span>
         </a>
       </div>
@@ -29,21 +29,30 @@
 
     <main>
       <section class="hero">
-        <div class="container">
-          <h1>A simple editor, built to explore.</h1>
-          <p class="lead">
-            Tau is a proof-of-concept desktop code editor. It lets you browse a
-            project, open files in tabs, edit with Monaco, and run commands in
-            an integrated terminal.
-          </p>
-          <a
-            href="https://github.com/martinsk/tau"
-            class="button"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            View on GitHub
-          </a>
+        <div class="container hero-container">
+          <div class="hero-content">
+            <h1>A simple editor, built to explore.</h1>
+            <p class="lead">
+              Tau is a proof-of-concept desktop code editor. It lets you browse
+              a project, open files in tabs, edit with Monaco, and run commands
+              in an integrated terminal.
+            </p>
+            <a
+              href="https://github.com/martinsk/tau"
+              class="button"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View on GitHub
+            </a>
+          </div>
+          <img
+            class="hero-icon"
+            src="favicon.png"
+            alt=""
+            width="160"
+            height="160"
+          />
         </div>
       </section>
 
@@ -61,50 +70,50 @@
         </div>
       </section>
 
-      <section class="section">
-        <div class="container">
+      <section class="section section--screenshot">
+        <div class="container container--wide">
           <h2>Current interface</h2>
           <figure class="screenshot">
             <img
               src="tau-screenshot.png"
               alt="The Tau editor with a file tree, open tabs, code editing, and a terminal panel."
               width="1200"
-              height="750"
+              height="834"
               loading="lazy"
             />
-            <figcaption>A screenshot of the current Tau interface.</figcaption>
+            <figcaption>Browsing and editing a project.</figcaption>
           </figure>
         </div>
       </section>
 
-      <section class="section">
-        <div class="container">
+      <section class="section section--screenshot">
+        <div class="container container--wide">
           <h2>Source control</h2>
           <figure class="screenshot">
             <img
               src="tau-screenshot-source-control.png"
               alt="The Tau source control panel showing staged and unstaged changes, a commit box, and an inline diff view."
               width="1200"
-              height="750"
+              height="834"
               loading="lazy"
             />
-            <figcaption>Stage, commit, and review diffs without leaving the editor.</figcaption>
+            <figcaption>Staging, committing, and reviewing diffs.</figcaption>
           </figure>
         </div>
       </section>
 
-      <section class="section">
-        <div class="container">
+      <section class="section section--screenshot">
+        <div class="container container--wide">
           <h2>Built-in coding agent</h2>
           <figure class="screenshot">
             <img
               src="tau-screenshot-agent.png"
               alt="The Tau agent panel running a Claude Code session alongside the editor and terminal."
               width="1200"
-              height="750"
+              height="769"
               loading="lazy"
             />
-            <figcaption>Run a coding agent like Claude Code directly inside the editor.</figcaption>
+            <figcaption>Running Claude Code in a dedicated panel.</figcaption>
           </figure>
         </div>
       </section>
