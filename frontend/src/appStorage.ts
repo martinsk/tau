@@ -1,8 +1,26 @@
+import type { KeybindingMode } from "./keymaps.js";
+
 export interface RecentFolderStore {
   getLastOpenedFolder(): string | null;
   setLastOpenedFolder(path: string | null): void;
   getRecentFolders(): string[];
   addRecentFolder(path: string): void;
+}
+
+const KEYBINDING_MODE_KEY = "tau:keybinding-mode";
+
+/**
+ * Keybinding mode is a global app preference (not per-project), so it lives
+ * alongside the other simple localStorage-backed settings here.
+ */
+export function getKeybindingMode(): KeybindingMode {
+  const raw = localStorage.getItem(KEYBINDING_MODE_KEY);
+  if (raw === "emacs" || raw === "vim" || raw === "default") return raw;
+  return "default";
+}
+
+export function setKeybindingMode(mode: KeybindingMode): void {
+  localStorage.setItem(KEYBINDING_MODE_KEY, mode);
 }
 
 export function createLocalRecentFolderStore(): RecentFolderStore {

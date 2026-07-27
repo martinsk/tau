@@ -56,6 +56,8 @@ import {
 } from "./agentConfig.js";
 import {
   createLocalRecentFolderStore,
+  getKeybindingMode,
+  setKeybindingMode,
   type RecentFolderStore,
 } from "./appStorage.js";
 import {
@@ -65,6 +67,9 @@ import {
   taskCommand,
 } from "./tasks.js";
 import { LspManager } from "./lsp.js";
+import { registerCommands, runCommand } from "./commands.js";
+import { chordFromEvent, findBinding, type KeybindingMode } from "./keymaps.js";
+import { createCommandPalette } from "./components/CommandPalette.js";
 
 interface AppState {
   rootPath: string | null;
@@ -78,6 +83,7 @@ interface AppState {
   agentVisible: boolean;
   agentConfig: HarnessConfig;
   agentSessionId: string | null;
+  keybindingMode: KeybindingMode;
 }
 
 const state: AppState = {
@@ -92,10 +98,12 @@ const state: AppState = {
   agentVisible: false,
   agentConfig: resolveHarness(null, null),
   agentSessionId: null,
+  keybindingMode: getKeybindingMode(),
 };
 
 let layout: LayoutAPI | null = null;
 let lspManager: LspManager | null = null;
+let commandPalette: ReturnType<typeof createCommandPalette> | null = null;
 const layoutStorage: LayoutStorage = createLocalLayoutStorage();
 const recentFolderStore: RecentFolderStore = createLocalRecentFolderStore();
 const agentConfigStore = createLocalAgentConfigStore();
@@ -754,6 +762,147 @@ async function handleFileDrop(
 }
 
 
+function handleCloseActiveTab() {
+  const pane = findPane(state.editorRoot, state.activePaneId);
+  if (pane?.activeTab?.path) {
+    handleTabClose(state.activePaneId, pane.activeTab.path);
+  }
+}
+
+function handleKillActiveTerminal() {
+  if (
+    state.terminalState.kind === "terminalsOpen" &&
+    state.terminalState.activeTerminalId
+  ) {
+    handleCloseTerminal(state.terminalState.activeTerminalId);
+  }
+}
+
+function focusPaneRelative(direction: 1 | -1) {
+  const panes = collectEditorPanes(state.editorRoot);
+  if (panes.length < 2) return;
+  const currentIndex = panes.findIndex((p) => p.id === state.activePaneId);
+  const nextIndex =
+    (currentIndex + direction + panes.length) % panes.length;
+  const next = panes[nextIndex];
+  state.activePaneId = next.id;
+  layout?.focusPane(next.id);
+}
+
+function handleSetKeybindingMode(mode: KeybindingMode) {
+  state.keybindingMode = mode;
+  setKeybindingMode(mode);
+}
+
+/**
+ * Registers every action in the app as a discoverable command so it shows
+ * up in the command palette and can be bound via any keymap.
+ */
+function registerAppCommands() {
+  registerCommands([
+    {
+      id: "commandPalette.open",
+      title: "Open Command Palette",
+      run: () => commandPalette?.open(),
+    },
+    {
+      id: "file.openFolder",
+      title: "File: Open Folder…",
+      run: () => handleOpenFolder(),
+    },
+    {
+      id: "file.save",
+      title: "File: Save",
+      run: () => handleSave(state.activePaneId),
+    },
+    {
+      id: "tab.close",
+      title: "File: Close Tab",
+      run: () => handleCloseActiveTab(),
+    },
+    {
+      id: "view.splitHorizontal",
+      title: "View: Split Editor Horizontally",
+      run: () => handleSplit(state.activePaneId, "row"),
+    },
+    {
+      id: "view.splitVertical",
+      title: "View: Split Editor Vertically",
+      run: () => handleSplit(state.activePaneId, "column"),
+    },
+    {
+      id: "terminal.toggle",
+      title: "Terminal: Toggle Panel",
+      run: () => handleToggleTerminal(),
+    },
+    {
+      id: "terminal.new",
+      title: "Terminal: New Terminal",
+      run: () => handleNewTerminal(),
+    },
+    {
+      id: "terminal.kill",
+      title: "Terminal: Kill Active Terminal",
+      run: () => handleKillActiveTerminal(),
+    },
+    {
+      id: "agent.toggle",
+      title: "Agent: Toggle Panel",
+      run: () => handleToggleAgent(),
+    },
+    {
+      id: "task.runBuild",
+      title: "Task: Run Build Task",
+      run: () => runTask("build"),
+    },
+    {
+      id: "task.runTest",
+      title: "Task: Run Test Task",
+      run: () => runTask("test"),
+    },
+    {
+      id: "sidebar.toggle",
+      title: "View: Toggle Sidebar",
+      run: () => layout?.toggleSidebar(),
+    },
+    {
+      id: "view.focusExplorer",
+      title: "View: Show Explorer",
+      run: () => layout?.focusExplorer(),
+    },
+    {
+      id: "view.focusSourceControl",
+      title: "View: Show Source Control",
+      run: () => layout?.focusSourceControl(),
+    },
+    {
+      id: "pane.focusNext",
+      title: "View: Focus Next Editor Pane",
+      run: () => focusPaneRelative(1),
+    },
+    {
+      id: "pane.focusPrevious",
+      title: "View: Focus Previous Editor Pane",
+      run: () => focusPaneRelative(-1),
+    },
+    {
+      id: "keybindings.useDefault",
+      title: "Preferences: Use Default Keybindings",
+      run: () => handleSetKeybindingMode("default"),
+    },
+    {
+      id: "keybindings.useEmacs",
+      title: "Preferences: Use Emacs Keybindings",
+      run: () => handleSetKeybindingMode("emacs"),
+    },
+    {
+      id: "keybindings.useVim",
+      title: "Preferences: Use Vim Keybindings",
+      run: () => handleSetKeybindingMode("vim"),
+    },
+  ]);
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const app = document.getElementById("app");
   if (!app) {
@@ -807,34 +956,39 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   app.appendChild(layout.element);
 
+  registerAppCommands();
+  commandPalette = createCommandPalette(() => state.keybindingMode);
+  document.body.appendChild(commandPalette.element);
+
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (commandPalette?.isOpen() && commandPalette.element.contains(e.target as Node)) {
+        return;
+      }
+      const chord = chordFromEvent(e);
+      if (!chord) return;
+      const binding = findBinding(state.keybindingMode, chord);
+      if (!binding) return;
+      e.preventDefault();
+      e.stopPropagation();
+      runCommand(binding.commandId);
+    },
+    { capture: true }
+  );
+
   try {
-    await listen("menu-open-folder", () => handleOpenFolder());
-    await listen("menu-save", () => handleSave(state.activePaneId));
-    await listen("menu-close-tab", () => {
-      const pane = findPane(state.editorRoot, state.activePaneId);
-      if (pane?.activeTab?.path) {
-        handleTabClose(state.activePaneId, pane.activeTab.path);
-      }
-    });
-    await listen("menu-split-horizontal", () =>
-      handleSplit(state.activePaneId, "row")
-    );
-    await listen("menu-split-vertical", () =>
-      handleSplit(state.activePaneId, "column")
-    );
-    await listen("menu-toggle-terminal", () => handleToggleTerminal());
-    await listen("menu-toggle-agent", () => handleToggleAgent());
-    await listen("menu-new-terminal", () => handleNewTerminal());
-    await listen("menu-kill-terminal", () => {
-      if (
-        state.terminalState.kind === "terminalsOpen" &&
-        state.terminalState.activeTerminalId
-      ) {
-        handleCloseTerminal(state.terminalState.activeTerminalId);
-      }
-    });
-    await listen("menu-run-build-task", () => runTask("build"));
-    await listen("menu-run-test-task", () => runTask("test"));
+    await listen("menu-open-folder", () => runCommand("file.openFolder"));
+    await listen("menu-save", () => runCommand("file.save"));
+    await listen("menu-close-tab", () => runCommand("tab.close"));
+    await listen("menu-split-horizontal", () => runCommand("view.splitHorizontal"));
+    await listen("menu-split-vertical", () => runCommand("view.splitVertical"));
+    await listen("menu-toggle-terminal", () => runCommand("terminal.toggle"));
+    await listen("menu-toggle-agent", () => runCommand("agent.toggle"));
+    await listen("menu-new-terminal", () => runCommand("terminal.new"));
+    await listen("menu-kill-terminal", () => runCommand("terminal.kill"));
+    await listen("menu-run-build-task", () => runCommand("task.runBuild"));
+    await listen("menu-run-test-task", () => runCommand("task.runTest"));
     await listen<{ root_path: string }>("git-status-changed", (event) => {
       if (event.payload.root_path === state.rootPath) {
         refreshGitStatus();

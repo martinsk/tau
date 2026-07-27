@@ -90,6 +90,10 @@ export interface LayoutAPI {
   ) => Promise<void>;
   setAgentVisible: (visible: boolean) => void;
   setAgentWidth: (width: number) => void;
+  toggleSidebar: () => void;
+  focusExplorer: () => void;
+  focusSourceControl: () => void;
+  focusPane: (paneId: string) => void;
 }
 
 export function createLayout(
@@ -159,7 +163,24 @@ export function createLayout(
   sidebarContainer.appendChild(sidebar.element);
   sidebarContainer.appendChild(sourceControl.element);
 
+  let sidebarVisible = true;
+  function toggleSidebar() {
+    sidebarVisible = !sidebarVisible;
+    sidebarContainer.classList.toggle("hidden", !sidebarVisible);
+    sidebarResizer.element.classList.toggle("hidden", !sidebarVisible);
+  }
+
   let activityView: "explorer" | "source-control" = "explorer";
+  function focusExplorer() {
+    activityView = "explorer";
+    if (!sidebarVisible) toggleSidebar();
+    updateActivityView();
+  }
+  function focusSourceControl() {
+    activityView = "source-control";
+    if (!sidebarVisible) toggleSidebar();
+    updateActivityView();
+  }
   function updateActivityView() {
     sidebar.element.classList.toggle("hidden", activityView !== "explorer");
     sourceControl.element.classList.toggle(
@@ -177,14 +198,8 @@ export function createLayout(
       activityView === "source-control"
     );
   }
-  explorerButton.addEventListener("click", () => {
-    activityView = "explorer";
-    updateActivityView();
-  });
-  sourceControlButton.addEventListener("click", () => {
-    activityView = "source-control";
-    updateActivityView();
-  });
+  explorerButton.addEventListener("click", () => focusExplorer());
+  sourceControlButton.addEventListener("click", () => focusSourceControl());
   updateActivityView();
 
   const sidebarResizer = createResizer({
@@ -411,6 +426,10 @@ export function createLayout(
     agentPanel.element.style.width = `${Math.max(280, width)}px`;
   }
 
+  function focusPane(paneId: string) {
+    editorPanes.get(paneId)?.focus();
+  }
+
   return {
     element: wrapper,
     updateTree,
@@ -422,5 +441,9 @@ export function createLayout(
     updateAgent,
     setAgentVisible,
     setAgentWidth,
+    toggleSidebar,
+    focusExplorer,
+    focusSourceControl,
+    focusPane,
   };
 }
