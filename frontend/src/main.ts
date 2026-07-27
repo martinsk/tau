@@ -66,7 +66,7 @@ import {
   findTaskByLabel,
   taskCommand,
 } from "./tasks.js";
-import type { LspManager } from "./lsp.js";
+import type { Diagnostic, LspManager } from "./lsp.js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { registerCommands, runCommand } from "./commands.js";
 import { chordFromEvent, findBinding, type KeybindingMode } from "./keymaps.js";
@@ -232,7 +232,48 @@ function hydratePane(data: unknown): PaneNode {
 function updateLayout() {
   layout?.updateEditorRoot(state.editorRoot, state.activePaneId);
   layout?.updateTerminals(state.terminalState);
+  maybeRefreshOutline();
   saveLayout();
+}
+
+let outlineRequestVersion = 0;
+let lastOutlinePath: string | null = null;
+let outlineDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Fetches document symbols for the active tab and pushes them to the sidebar. */
+async function refreshOutline() {
+  const pane = findPane(state.editorRoot, state.activePaneId);
+  const tab = pane?.activeTab;
+  lastOutlinePath = tab?.path ?? null;
+  if (!tab || tab.diff || !lspManager) {
+    layout?.updateOutline([], false);
+    return;
+  }
+  const version = ++outlineRequestVersion;
+  const nodes = await lspManager.documentSymbols(tab.path, languageForFile(tab.name));
+  if (version !== outlineRequestVersion) return; // superseded by a newer request
+  layout?.updateOutline(nodes ?? [], nodes !== null);
+}
+
+/** Called from `updateLayout` — only re-fetches when the active tab actually changed. */
+function maybeRefreshOutline() {
+  const pane = findPane(state.editorRoot, state.activePaneId);
+  const path = pane?.activeTab?.path ?? null;
+  if (path === lastOutlinePath) return;
+  if (outlineDebounceTimer) {
+    clearTimeout(outlineDebounceTimer);
+    outlineDebounceTimer = null;
+  }
+  refreshOutline();
+}
+
+/** Debounced refresh used while the user is actively typing in the active tab. */
+function scheduleOutlineRefresh() {
+  if (outlineDebounceTimer) clearTimeout(outlineDebounceTimer);
+  outlineDebounceTimer = setTimeout(() => {
+    outlineDebounceTimer = null;
+    refreshOutline();
+  }, 400);
 }
 
 async function handleOpenFolder() {
@@ -301,10 +342,23 @@ async function openFolder(path: string) {
   // `lsp.ts` pulls in `monaco-editor`; import it lazily so it doesn't add
   // to the initial app bundle evaluation before a folder is opened.
   const { LspManager: LspManagerClass } = await import("./lsp.js");
-  lspManager = new LspManagerClass(path);
-  lspManager.loadSettings().then(() => {
-    lspManager?.registerLanguageFeatures();
+  const manager = new LspManagerClass(path);
+  lspManager = manager;
+  await manager.loadSettings();
+  manager.registerLanguageFeatures();
+  manager.onDiagnosticsChange((diagnostics) => {
+    layout?.updateDiagnostics(diagnostics);
   });
+  layout?.updateDiagnostics(manager.getDiagnostics());
+
+  const openedPaths = new Set<string>();
+  for (const pane of collectEditorPanes(state.editorRoot)) {
+    for (const tab of pane.tabs) {
+      if (tab.diff || openedPaths.has(tab.path)) continue;
+      openedPaths.add(tab.path);
+      manager.openDocument(tab.path, languageForFile(tab.name), tab.content);
+    }
+  }
 
   gitWatchRepo(path).catch((err) => {
     console.error("Failed to watch git repository:", err);
@@ -475,6 +529,20 @@ async function handleFileClick(path: string, name: string) {
   }
 }
 
+async function handleOpenProblem(diagnostic: Diagnostic) {
+  const name = diagnostic.path.split("/").pop() ?? diagnostic.path;
+  await handleFileClick(diagnostic.path, name);
+  if (!layout) return;
+  await layout.updateEditorRoot(state.editorRoot, state.activePaneId);
+  layout.revealPosition(
+    state.activePaneId,
+    diagnostic.line,
+    diagnostic.column,
+    diagnostic.endLine,
+    diagnostic.endColumn
+  );
+}
+
 function languageForFile(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   switch (ext) {
@@ -581,11 +649,15 @@ async function handleSave(paneId: string) {
   try {
     const content = layout.getPaneContent(paneId);
     await writeFile(tab.path, content);
+    await lspManager?.saveDocument(tab.path);
     tab.content = content;
     tab.dirty = false;
     layout.updatePaneTabs(paneId);
     saveLayout();
     refreshGitStatus();
+    if (paneId === state.activePaneId) {
+      refreshOutline();
+    }
   } catch (err) {
     console.error("Failed to save file:", err);
     alert(`Failed to save file: ${err}`);
@@ -603,6 +675,9 @@ function handleContentChange(paneId: string, content: string) {
     layout?.updatePaneTabs(paneId);
   }
   lspManager?.changeDocument(tab.path, content);
+  if (paneId === state.activePaneId) {
+    scheduleOutlineRefresh();
+  }
 }
 
 function handleTabDrop(targetPaneId: string, tabJson: string) {
@@ -628,6 +703,7 @@ function handleTabDrop(targetPaneId: string, tabJson: string) {
 
 function handlePaneFocus(paneId: string) {
   state.activePaneId = paneId;
+  maybeRefreshOutline();
 }
 
 function handleToggleTerminal() {
@@ -975,6 +1051,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         state.agentWidth = width;
         saveLayout();
       },
+      onOpenProblem: handleOpenProblem,
     },
     {
       sidebarWidth: state.sidebarWidth,

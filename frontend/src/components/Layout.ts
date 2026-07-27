@@ -17,6 +17,8 @@ import { createAgentPanel } from "./AgentPanel.js";
 import type { HarnessConfig } from "../agentConfig.js";
 import type { FileNode, RepoStatus } from "../api.js";
 import type { TabInfo } from "./Tabs.js";
+import type { OutlineNode, Diagnostic } from "../lsp.js";
+import { createProblemsPanel } from "./ProblemsPanel.js";
 
 export type EmptyEditorPane = {
   type: "editor";
@@ -73,11 +75,14 @@ export interface LayoutCallbacks {
   onAgentStop: () => void;
   onAgentConfigChange: (config: HarnessConfig) => void;
   onAgentResize: (width: number) => void;
+  onOpenProblem: (diagnostic: Diagnostic) => void;
 }
 
 export interface LayoutAPI {
   element: HTMLElement;
   updateTree: (nodes: FileNode[]) => void;
+  updateOutline: (nodes: OutlineNode[], available: boolean) => void;
+  updateDiagnostics: (diagnostics: Diagnostic[]) => void;
   updateEditorRoot: (root: PaneNode, activePaneId: string) => Promise<void>;
   updatePaneTabs: (paneId: string) => void;
   updateTerminals: (state: TerminalState) => void;
@@ -94,6 +99,13 @@ export interface LayoutAPI {
   focusExplorer: () => void;
   focusSourceControl: () => void;
   focusPane: (paneId: string) => void;
+  revealPosition: (
+    paneId: string,
+    line: number,
+    column: number,
+    endLine?: number,
+    endColumn?: number
+  ) => void;
 }
 
 export function createLayout(
@@ -144,7 +156,11 @@ export function createLayout(
   sourceControlWrapper.appendChild(changeBadge);
   activityBar.appendChild(sourceControlWrapper);
 
-  const sidebar = createSidebar(callbacks.onOpenFolder, callbacks.onFileClick);
+  const sidebar = createSidebar(
+    callbacks.onOpenFolder,
+    callbacks.onFileClick,
+    (line, column) => revealPosition(currentActivePaneId, line, column)
+  );
   const sourceControl = createSourceControl({
     onStage: (path) => callbacks.onStageFile(path),
     onUnstage: (path) => callbacks.onUnstageFile(path),
@@ -222,15 +238,73 @@ export function createLayout(
     onCloseTerminal: (id: string) => callbacks.onCloseTerminal(id),
     onSwitchTerminal: (id: string) => callbacks.onSwitchTerminal(id),
   });
+  terminalManager.element.classList.remove("h-48", "border-t", "border-tau-border", "hidden");
+  terminalManager.element.classList.add("absolute", "inset-0");
+
+  const problemsPanel = createProblemsPanel((diagnostic) =>
+    callbacks.onOpenProblem(diagnostic)
+  );
+  problemsPanel.element.classList.add("absolute", "inset-0", "hidden");
+
+  const bottomPanel = document.createElement("div");
+  bottomPanel.className = "border-t border-tau-border bg-tau-bg hidden flex flex-col";
   const terminalHeight = Math.max(120, options.terminalHeight ?? 192);
-  terminalManager.element.style.height = `${terminalHeight}px`;
-  terminalManager.element.classList.remove("h-48");
+  bottomPanel.style.height = `${terminalHeight}px`;
+
+  const bottomTabs = document.createElement("div");
+  bottomTabs.className =
+    "h-8 bg-tau-panel border-b border-tau-border flex items-center px-3 gap-4 select-none shrink-0 text-xs uppercase tracking-wide";
+
+  const problemsTabButton = document.createElement("button");
+  problemsTabButton.textContent = "Problems";
+  problemsTabButton.className = "py-1 border-b-2 border-transparent text-tau-muted hover:text-tau-fg";
+  const terminalTabButton = document.createElement("button");
+  terminalTabButton.textContent = "Terminal";
+  terminalTabButton.className = "py-1 border-b-2 border-transparent text-tau-muted hover:text-tau-fg";
+
+  bottomTabs.appendChild(problemsTabButton);
+  bottomTabs.appendChild(terminalTabButton);
+
+  const bottomBody = document.createElement("div");
+  bottomBody.className = "flex-1 min-h-0 relative";
+  bottomBody.appendChild(problemsPanel.element);
+  bottomBody.appendChild(terminalManager.element);
+
+  bottomPanel.appendChild(bottomTabs);
+  bottomPanel.appendChild(bottomBody);
+
+  let bottomView: "terminal" | "problems" = "terminal";
+  let problemsForcedVisible = false;
+  let lastTerminalBottomVisible = false;
+  let lastDiagnosticsCount = 0;
+
+  function recomputeBottomVisibility() {
+    const visible = problemsForcedVisible || lastTerminalBottomVisible;
+    bottomPanel.classList.toggle("hidden", !visible);
+    terminalManager.setVisible(visible && bottomView === "terminal");
+    problemsPanel.element.classList.toggle("hidden", !(visible && bottomView === "problems"));
+    problemsTabButton.classList.toggle("text-tau-fg", bottomView === "problems");
+    problemsTabButton.classList.toggle("border-tau-accent", bottomView === "problems");
+    terminalTabButton.classList.toggle("text-tau-fg", bottomView === "terminal");
+    terminalTabButton.classList.toggle("border-tau-accent", bottomView === "terminal");
+  }
+
+  function setBottomView(view: "terminal" | "problems") {
+    bottomView = view;
+    if (view === "problems") problemsForcedVisible = true;
+    else problemsForcedVisible = false;
+    recomputeBottomVisibility();
+  }
+
+  problemsTabButton.addEventListener("click", () => setBottomView("problems"));
+  terminalTabButton.addEventListener("click", () => setBottomView("terminal"));
+  recomputeBottomVisibility();
 
   const terminalResizer = createResizer({
     direction: "column",
     onChange(delta) {
-      const next = Math.max(120, terminalManager.element.offsetHeight + delta);
-      terminalManager.element.style.height = `${next}px`;
+      const next = Math.max(120, bottomPanel.offsetHeight + delta);
+      bottomPanel.style.height = `${next}px`;
       callbacks.onTerminalResize(next);
       terminalManager.fitActive();
     },
@@ -238,7 +312,7 @@ export function createLayout(
 
   mainArea.appendChild(editorContainer);
   mainArea.appendChild(terminalResizer.element);
-  mainArea.appendChild(terminalManager.element);
+  mainArea.appendChild(bottomPanel);
 
   const agentPanel = createAgentPanel({
     onStart: callbacks.onAgentStart,
@@ -273,6 +347,7 @@ export function createLayout(
   wrapper.appendChild(statusBar.element);
 
   let currentRoot: PaneNode | null = null;
+  let currentActivePaneId = "";
   const editorPanes = new Map<string, EditorPaneAPI>();
   let activeSplitPanes: SplitPaneAPI[] = [];
 
@@ -358,6 +433,7 @@ export function createLayout(
 
   async function updateEditorRoot(root: PaneNode, activePaneId: string) {
     currentRoot = root;
+    currentActivePaneId = activePaneId;
     cleanupRemovedPanes(root);
     const version = ++editorRootRenderVersion;
     const newSplitPanes: SplitPaneAPI[] = [];
@@ -404,7 +480,8 @@ export function createLayout(
       for (const id of terminalManager.listTerminals()) {
         await terminalManager.closeTerminal(id);
       }
-      terminalManager.setVisible(false);
+      lastTerminalBottomVisible = false;
+      recomputeBottomVisibility();
       return;
     }
 
@@ -421,7 +498,21 @@ export function createLayout(
       }
     }
     terminalManager.setActive(state.activeTerminalId);
-    terminalManager.setVisible(state.bottomPanelVisible);
+    lastTerminalBottomVisible = state.bottomPanelVisible;
+    if (state.bottomPanelVisible) bottomView = "terminal";
+    recomputeBottomVisibility();
+  }
+
+  function updateDiagnostics(diagnostics: Diagnostic[]) {
+    problemsPanel.update(diagnostics);
+    lastDiagnosticsCount = diagnostics.length;
+    problemsTabButton.textContent =
+      lastDiagnosticsCount > 0 ? `Problems (${lastDiagnosticsCount})` : "Problems";
+    if (lastDiagnosticsCount > 0 && !problemsForcedVisible && !lastTerminalBottomVisible) {
+      bottomView = "problems";
+      problemsForcedVisible = true;
+      recomputeBottomVisibility();
+    }
   }
 
   function getPaneContent(paneId: string): string {
@@ -430,6 +521,10 @@ export function createLayout(
 
   function updateTree(nodes: FileNode[]) {
     sidebar.updateTree(nodes);
+  }
+
+  function updateOutline(nodes: OutlineNode[], available: boolean) {
+    sidebar.updateOutline(nodes, available);
   }
 
   function updateGitStatus(status: RepoStatus | null) {
@@ -467,9 +562,23 @@ export function createLayout(
     editorPanes.get(paneId)?.focus();
   }
 
+  function revealPosition(
+    paneId: string,
+    line: number,
+    column: number,
+    endLine?: number,
+    endColumn?: number
+  ) {
+    editorPanes
+      .get(paneId)
+      ?.revealPosition(line, column, endLine, endColumn);
+  }
+
   return {
     element: wrapper,
     updateTree,
+    updateOutline,
+    updateDiagnostics,
     updateEditorRoot,
     updatePaneTabs,
     updateTerminals,
@@ -482,5 +591,6 @@ export function createLayout(
     focusExplorer,
     focusSourceControl,
     focusPane,
+    revealPosition,
   };
 }

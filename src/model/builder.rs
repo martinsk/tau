@@ -11,6 +11,7 @@ pub struct Draft;
 #[derive(Debug, Clone, Copy)]
 pub struct Validated;
 
+
 /// A typestate builder for constructing a [`Project`] while preserving core
 /// invariants: containers and items referenced by a parent must exist, and
 /// references must point to existing items. The builder transitions from

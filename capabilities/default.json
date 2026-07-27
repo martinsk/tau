@@ -8,6 +8,15 @@
     "core:window:allow-start-dragging",
     "core:window:allow-is-fullscreen",
     "core:window:allow-set-fullscreen",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "shell:allow-kill",
+    "shell:allow-stdin-write",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "rust-analyzer", "cmd": "rust-analyzer", "args": true },
+        { "name": "clangd", "cmd": "clangd", "args": true }
+      ]
+    }
   ]
 }

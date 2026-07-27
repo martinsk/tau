@@ -71,6 +71,12 @@ export interface EditorPaneAPI {
   updateContent: (tab: TabInfo | null) => void;
   getContent: () => string;
   focus: () => void;
+  revealPosition: (
+    line: number,
+    column: number,
+    endLine?: number,
+    endColumn?: number
+  ) => void;
 }
 
 export interface EditorPaneCallbacks {
@@ -174,7 +180,7 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
     automaticLayout: true,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
-    renderValidationDecorations: "off",
+    renderValidationDecorations: "on",
   });
 
   const diffEditorEl = document.createElement("div");
@@ -193,7 +199,7 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      renderValidationDecorations: "off",
+      renderValidationDecorations: "on",
       originalEditable: false,
     });
     diffEditor.getModifiedEditor().onDidChangeModelContent(() => {
@@ -402,10 +408,34 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
     onFocus();
   }
 
+  function revealPosition(
+    line: number,
+    column: number,
+    endLine?: number,
+    endColumn?: number
+  ) {
+    const target = activeIsDiff && diffEditor ? diffEditor.getModifiedEditor() : editor;
+    if (endLine !== undefined && endColumn !== undefined) {
+      const range = {
+        startLineNumber: line,
+        startColumn: column,
+        endLineNumber: endLine,
+        endColumn,
+      };
+      target.setSelection(range);
+      target.revealRangeInCenter(range);
+    } else {
+      target.setPosition({ lineNumber: line, column });
+      target.revealPositionInCenter({ lineNumber: line, column });
+    }
+    target.focus();
+    onFocus();
+  }
+
   container.addEventListener("focus", onFocus);
   container.addEventListener("mousedown", onFocus);
 
-  return { element: container, updateTabs, updateContent, getContent, focus };
+  return { element: container, updateTabs, updateContent, getContent, focus, revealPosition };
 }
 
 function languageForFile(filename: string): string {

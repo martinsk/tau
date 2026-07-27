@@ -1,12 +1,44 @@
 import { readDir, type FileNode, type RepoStatus, type FileStatusKind } from "../api.js";
 import { setDrag, clearDrag } from "../dragState.js";
 import { getFileIcon } from "../fileIcons.js";
+import type { OutlineNode } from "../lsp.js";
 
 export interface SidebarAPI {
   element: HTMLElement;
   updateTree: (nodes: FileNode[]) => void;
   updateGitStatus: (status: RepoStatus | null) => void;
+  updateOutline: (nodes: OutlineNode[], available: boolean) => void;
 }
+
+// Subset of the LSP `SymbolKind` enum, abbreviated for a compact sidebar row.
+const SYMBOL_KIND_LABEL: Record<number, string> = {
+  1: "File",
+  2: "Mod",
+  3: "NS",
+  4: "Pkg",
+  5: "Cls",
+  6: "Mth",
+  7: "Prop",
+  8: "Fld",
+  9: "Ctor",
+  10: "Enum",
+  11: "Ifc",
+  12: "Fn",
+  13: "Var",
+  14: "Const",
+  15: "Str",
+  16: "Num",
+  17: "Bool",
+  18: "Arr",
+  19: "Obj",
+  20: "Key",
+  21: "Null",
+  22: "Member",
+  23: "Struct",
+  24: "Event",
+  25: "Op",
+  26: "Type",
+};
 
 const STATUS_LABEL: Record<FileStatusKind, string> = {
   modified: "M",
@@ -37,7 +69,8 @@ function badgeInfo(
  */
 export function createSidebar(
   onOpenFolder: () => void,
-  onFileClick: (path: string, name: string) => void
+  onFileClick: (path: string, name: string) => void,
+  onOutlineSymbolClick: (line: number, column: number) => void
 ): SidebarAPI {
   const sidebar = document.createElement("div");
   sidebar.className =
@@ -55,10 +88,20 @@ export function createSidebar(
   header.appendChild(openButton);
 
   const tree = document.createElement("div");
-  tree.className = "flex-1 px-2 py-1 text-sm overflow-auto";
+  tree.className = "flex-1 px-2 py-1 text-sm overflow-auto min-h-0";
+
+  const outlineHeader = document.createElement("div");
+  outlineHeader.className =
+    "px-4 py-2 text-xs uppercase tracking-wider text-tau-muted border-t border-tau-border";
+  outlineHeader.textContent = "Outline";
+
+  const outlineTree = document.createElement("div");
+  outlineTree.className = "flex-1 px-2 py-1 text-sm overflow-auto min-h-0";
 
   sidebar.appendChild(header);
   sidebar.appendChild(tree);
+  sidebar.appendChild(outlineHeader);
+  sidebar.appendChild(outlineTree);
 
   let currentStatus = new Map<string, { staged: FileStatusKind | null; unstaged: FileStatusKind | null }>();
   const badgeEls = new Map<string, HTMLElement>();
@@ -213,5 +256,52 @@ export function createSidebar(
     }
   }
 
-  return { element: sidebar, updateTree, updateGitStatus };
+  function renderOutlineNode(node: OutlineNode, depth: number, container: HTMLElement) {
+    const row = document.createElement("div");
+    row.className =
+      "py-1 px-2 hover:bg-tau-active-hover cursor-pointer flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis";
+    row.style.paddingLeft = `${depth * 12 + 8}px`;
+    row.title = node.name;
+
+    const kindLabel = document.createElement("span");
+    kindLabel.textContent = SYMBOL_KIND_LABEL[node.kind] ?? "?";
+    kindLabel.className =
+      "shrink-0 text-[9px] font-bold text-tau-accent w-10 text-center uppercase";
+    row.appendChild(kindLabel);
+
+    const name = document.createElement("span");
+    name.textContent = node.name;
+    name.className = "truncate flex-1";
+    row.appendChild(name);
+
+    row.addEventListener("click", () => onOutlineSymbolClick(node.line, node.column));
+    container.appendChild(row);
+
+    for (const child of node.children) {
+      renderOutlineNode(child, depth + 1, container);
+    }
+  }
+
+  function updateOutline(nodes: OutlineNode[], available: boolean) {
+    outlineTree.innerHTML = "";
+    if (!available) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "px-2 py-1 text-xs text-tau-muted italic";
+      placeholder.textContent = "Outline unavailable";
+      outlineTree.appendChild(placeholder);
+      return;
+    }
+    if (nodes.length === 0) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "px-2 py-1 text-xs text-tau-muted italic";
+      placeholder.textContent = "No symbols";
+      outlineTree.appendChild(placeholder);
+      return;
+    }
+    for (const node of nodes) {
+      renderOutlineNode(node, 0, outlineTree);
+    }
+  }
+
+  return { element: sidebar, updateTree, updateGitStatus, updateOutline };
 }

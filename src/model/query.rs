@@ -20,6 +20,7 @@ pub fn references_from(project: &Project, id: ItemId) -> Vec<&Reference> {
         .collect()
 }
 
+
 pub fn references_to(project: &Project, id: ItemId) -> Vec<&Reference> {
     project
         .references
