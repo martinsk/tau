@@ -143,14 +143,28 @@ export async function gitStatus(rootPath: string): Promise<RepoStatus> {
   return await invoke<RepoStatus>("git_status", { rootPath });
 }
 
+export interface DiffContent {
+  original: string | null;
+  modified: string | null;
+  is_binary: boolean;
+}
+
 /**
- * Returns a unified diff for a single file, or the whole repo if omitted.
+ * Returns the original/modified text for a single file, for use in a diff
+ * editor. When `staged` is true, compares HEAD (original) against the index
+ * (modified) -- i.e. `git diff --cached`. When false, compares the index
+ * (original) against the working tree (modified) -- i.e. `git diff`.
  */
-export async function gitDiff(
+export async function gitDiffContent(
   rootPath: string,
-  filePath?: string
-): Promise<string> {
-  return await invoke<string>("git_diff", { rootPath, filePath });
+  filePath: string,
+  staged: boolean
+): Promise<DiffContent> {
+  return await invoke<DiffContent>("git_diff_content", {
+    rootPath,
+    filePath,
+    staged,
+  });
 }
 
 /**

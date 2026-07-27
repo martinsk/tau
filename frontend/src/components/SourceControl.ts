@@ -4,13 +4,12 @@ export interface SourceControlCallbacks {
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
   onCommit: (message: string) => void;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, staged: boolean) => void;
 }
 
 export interface SourceControlAPI {
   element: HTMLElement;
   update: (status: RepoStatus | null) => void;
-  showDiff: (path: string, diff: string) => void;
   changeCount: () => number;
 }
 
@@ -79,57 +78,7 @@ export function createSourceControl(
   lists.className = "flex-1 overflow-auto text-sm";
   container.appendChild(lists);
 
-  const diffArea = document.createElement("div");
-  diffArea.className =
-    "hidden flex-col border-t border-tau-border max-h-64 overflow-auto bg-tau-bg shrink-0";
-  const diffHeader = document.createElement("div");
-  diffHeader.className =
-    "px-2 py-1 text-xs text-tau-muted flex items-center justify-between border-b border-tau-border sticky top-0 bg-tau-bg";
-  const diffTitle = document.createElement("span");
-  diffTitle.className = "truncate";
-  diffHeader.appendChild(diffTitle);
-  const diffClose = document.createElement("button");
-  diffClose.textContent = "×";
-  diffClose.className = "hover:text-tau-accent px-1 shrink-0";
-  diffClose.addEventListener("click", () => {
-    diffArea.classList.add("hidden");
-    diffArea.classList.remove("flex");
-  });
-  diffHeader.appendChild(diffClose);
-  const diffContent = document.createElement("pre");
-  diffContent.className =
-    "text-[11px] leading-[16px] px-2 py-2 whitespace-pre-wrap font-mono m-0";
-  diffArea.appendChild(diffHeader);
-  diffArea.appendChild(diffContent);
-  container.appendChild(diffArea);
-
   let currentStatus: RepoStatus | null = null;
-
-  function renderDiffLine(line: string): HTMLElement {
-    const row = document.createElement("div");
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      row.className = "text-green-400";
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      row.className = "text-red-400";
-    } else if (line.startsWith("@@")) {
-      row.className = "text-tau-accent";
-    } else {
-      row.className = "text-tau-fg";
-    }
-    row.textContent = line || " ";
-    return row;
-  }
-
-  function showDiff(path: string, diff: string) {
-    diffTitle.textContent = path;
-    diffContent.innerHTML = "";
-    const lines = diff.length ? diff.split("\n") : ["No changes"];
-    for (const line of lines) {
-      diffContent.appendChild(renderDiffLine(line));
-    }
-    diffArea.classList.remove("hidden");
-    diffArea.classList.add("flex");
-  }
 
   function renderFileRow(status: FileStatus, staged: boolean): HTMLElement {
     const row = document.createElement("div");
@@ -159,7 +108,7 @@ export function createSourceControl(
       else callbacks.onStage(status.path);
     });
 
-    row.addEventListener("click", () => callbacks.onOpenFile(status.path));
+    row.addEventListener("click", () => callbacks.onOpenFile(status.path, staged));
 
     row.appendChild(name);
     row.appendChild(badge);
@@ -225,5 +174,5 @@ export function createSourceControl(
     return currentStatus?.files.length ?? 0;
   }
 
-  return { element: container, update, showDiff, changeCount };
+  return { element: container, update, changeCount };
 }

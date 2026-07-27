@@ -18,3 +18,16 @@
 body {
   @apply bg-tau-bg text-tau-fg;
 }
+
+.tab-scroll {
+  scrollbar-width: thin;
+}
+
+.tab-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tab-scroll::-webkit-scrollbar-thumb {
+  background: var(--tau-border);
+  border-radius: 2px;
+}

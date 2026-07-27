@@ -9,7 +9,7 @@ import {
   gitStage,
   gitUnstage,
   gitCommit,
-  gitDiff,
+  gitDiffContent,
   type FileNode,
   type RepoStatus,
 } from "./api.js";
@@ -112,10 +112,30 @@ function newTerminalId(): string {
   return `terminal-${terminalCounter}`;
 }
 
+function stripDiffTabs(node: PaneNode): PaneNode {
+  if (node.type === "editor") {
+    const tabs = node.tabs.filter((t) => !t.diff);
+    if (tabs.length === 0) return emptyEditorPane(node.id);
+    const activeTab =
+      node.activeTab && !node.activeTab.diff ? node.activeTab : tabs[tabs.length - 1];
+    return {
+      type: "editor",
+      id: node.id,
+      tabs: tabs as [TabInfo, ...TabInfo[]],
+      activeTab,
+    };
+  }
+  return {
+    type: "split",
+    direction: node.direction,
+    children: node.children.map(stripDiffTabs),
+  };
+}
+
 function saveLayout() {
   if (!state.rootPath) return;
   layoutStorage.save(state.rootPath, {
-    editorRoot: state.editorRoot,
+    editorRoot: stripDiffTabs(state.editorRoot),
     activePaneId: state.activePaneId,
     terminalState: state.terminalState,
     sidebarWidth: state.sidebarWidth,
@@ -298,6 +318,43 @@ async function refreshGitStatus() {
     state.gitStatus = null;
   }
   layout?.updateGitStatus(state.gitStatus);
+  await refreshOpenDiffTabs();
+}
+
+function collectEditorPanes(root: PaneNode, acc: EditorPane[] = []): EditorPane[] {
+  if (root.type === "editor") {
+    acc.push(root);
+    return acc;
+  }
+  for (const child of root.children) collectEditorPanes(child, acc);
+  return acc;
+}
+
+/**
+ * Re-fetches original/modified content for any currently open diff tabs so
+ * they don't go stale after staging/unstaging/committing. Skips the
+ * working-tree side of dirty (unsaved) tabs to avoid clobbering local edits.
+ */
+async function refreshOpenDiffTabs() {
+  if (!state.rootPath) return;
+  const rootPath = state.rootPath;
+  let changed = false;
+  for (const pane of collectEditorPanes(state.editorRoot)) {
+    for (const tab of pane.tabs) {
+      if (!tab.diff) continue;
+      try {
+        const diff = await gitDiffContent(rootPath, tab.path, tab.diff.staged);
+        tab.diff.original = diff.original ?? "";
+        if (!tab.dirty) {
+          tab.content = diff.modified ?? "";
+        }
+        changed = true;
+      } catch (err) {
+        console.error("Failed to refresh diff:", err);
+      }
+    }
+  }
+  if (changed) updateLayout();
 }
 
 async function handleStageFile(path: string) {
@@ -333,11 +390,25 @@ async function handleCommit(message: string) {
   }
 }
 
-async function handleOpenDiffFile(path: string) {
+async function handleOpenDiffFile(path: string, staged: boolean) {
   if (!state.rootPath) return;
   try {
-    const diff = await gitDiff(state.rootPath, path);
-    layout?.showDiff(path, diff);
+    const diff = await gitDiffContent(state.rootPath, path, staged);
+    if (diff.is_binary) {
+      alert("Binary file, diff not available.");
+      return;
+    }
+    const name = path.split("/").pop() ?? path;
+    const pane = getActivePane();
+    const tab: TabInfo = {
+      path,
+      name,
+      content: diff.modified ?? "",
+      dirty: false,
+      diff: { staged, original: diff.original ?? "", editable: !staged },
+    };
+    state.editorRoot = replacePane(state.editorRoot, pane.id, addTab(pane, tab));
+    updateLayout();
   } catch (err) {
     console.error("Failed to load diff:", err);
     alert(`Failed to load diff: ${err}`);
@@ -353,12 +424,21 @@ function getActivePane(): EditorPane {
 async function handleFileClick(path: string, name: string) {
   const pane = getActivePane();
   const existing = pane.tabs.find((t) => t.path === path);
-  if (existing) {
+  if (existing && !existing.diff) {
     state.editorRoot = replacePane(
       state.editorRoot,
       pane.id,
       setActiveTabByPath(pane, path)
     );
+    updateLayout();
+    return;
+  }
+
+  if (existing && existing.diff) {
+    // Switch an already-open diff tab back to a plain working-copy view.
+    const content = existing.dirty ? existing.content : await readFile(path).catch(() => existing.content);
+    const tab: TabInfo = { path, name, content, dirty: existing.dirty };
+    state.editorRoot = replacePane(state.editorRoot, pane.id, addTab(pane, tab));
     updateLayout();
     return;
   }
@@ -454,6 +534,7 @@ function handleSplitDrop(
     name: dropped.name,
     content: dropped.content,
     dirty: dropped.dirty,
+    diff: dropped.diff,
   };
 
   let updated = state.editorRoot;
@@ -476,6 +557,7 @@ async function handleSave(paneId: string) {
   if (!pane || !layout) return;
   const tab = pane.activeTab;
   if (!tab) return;
+  if (tab.diff && !tab.diff.editable) return;
   try {
     const content = layout.getPaneContent(paneId);
     await writeFile(tab.path, content);
@@ -513,6 +595,7 @@ function handleTabDrop(targetPaneId: string, tabJson: string) {
     name: dropped.name,
     content: dropped.content,
     dirty: dropped.dirty,
+    diff: dropped.diff,
   };
 
   state.editorRoot = moveTabToPane(state.editorRoot, sourcePaneId, targetPaneId, tab);

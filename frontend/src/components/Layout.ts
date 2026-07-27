@@ -68,7 +68,7 @@ export interface LayoutCallbacks {
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onCommit: (message: string) => void;
-  onOpenDiffFile: (path: string) => void;
+  onOpenDiffFile: (path: string, staged: boolean) => void;
   onAgentStart: (config: HarnessConfig) => void;
   onAgentStop: () => void;
   onAgentConfigChange: (config: HarnessConfig) => void;
@@ -83,7 +83,6 @@ export interface LayoutAPI {
   updateTerminals: (state: TerminalState) => void;
   getPaneContent: (paneId: string) => string;
   updateGitStatus: (status: RepoStatus | null) => void;
-  showDiff: (path: string, diff: string) => void;
   updateAgent: (
     workspace: string | null,
     config: HarnessConfig,
@@ -146,7 +145,7 @@ export function createLayout(
     onStage: (path) => callbacks.onStageFile(path),
     onUnstage: (path) => callbacks.onUnstageFile(path),
     onCommit: (message) => callbacks.onCommit(message),
-    onOpenFile: (path) => callbacks.onOpenDiffFile(path),
+    onOpenFile: (path, staged) => callbacks.onOpenDiffFile(path, staged),
   });
 
   const sidebarContainer = document.createElement("div");
@@ -289,7 +288,7 @@ export function createLayout(
       const tabs = node.tabs;
       const active = node.activeTab;
       api.updateTabs(tabs, active?.path ?? null);
-      api.updateContent(active?.name ?? null, active?.content ?? "");
+      api.updateContent(active);
       return api.element;
     }
 
@@ -412,14 +411,6 @@ export function createLayout(
     agentPanel.element.style.width = `${Math.max(280, width)}px`;
   }
 
-  function showDiff(path: string, diff: string) {
-    sourceControl.showDiff(path, diff);
-    if (activityView !== "source-control") {
-      activityView = "source-control";
-      updateActivityView();
-    }
-  }
-
   return {
     element: wrapper,
     updateTree,
@@ -428,7 +419,6 @@ export function createLayout(
     updateTerminals,
     getPaneContent,
     updateGitStatus,
-    showDiff,
     updateAgent,
     setAgentVisible,
     setAgentWidth,

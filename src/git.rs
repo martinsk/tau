@@ -46,6 +46,13 @@ pub struct Branch {
     pub is_remote: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DiffContent {
+    pub original: Option<String>,
+    pub modified: Option<String>,
+    pub is_binary: bool,
+}
+
 fn kind_from_status(status: Status, staged: bool) -> Option<FileStatusKind> {
     if staged {
         if status.is_index_new() {
@@ -175,32 +182,93 @@ fn resolve_relative(repo: &Repository, root_path: &str, file_path: &str) -> Stri
         .unwrap_or_else(|_| file_path.to_string())
 }
 
-fn diff_for_path(root_path: &str, file_path: Option<&str>) -> Result<String, String> {
-    let repo = Repository::open(root_path).map_err(|e| e.to_string())?;
-    let mut opts = git2::DiffOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true);
-    if let Some(fp) = file_path {
-        let rel = resolve_relative(&repo, root_path, fp);
-        opts.pathspec(rel);
-    }
+fn blob_content_at_tree(
+    repo: &Repository,
+    tree: &git2::Tree,
+    rel_path: &str,
+) -> Option<(Vec<u8>, bool)> {
+    let entry = tree.get_path(std::path::Path::new(rel_path)).ok()?;
+    let object = entry.to_object(repo).ok()?;
+    let blob = object.as_blob()?;
+    Some((blob.content().to_vec(), blob.is_binary()))
+}
 
-    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    let diff = repo
-        .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
-        .map_err(|e| e.to_string())?;
+fn blob_content_in_index(repo: &Repository, rel_path: &str) -> Option<(Vec<u8>, bool)> {
+    let index = repo.index().ok()?;
+    let entry = index.get_path(std::path::Path::new(rel_path), 0)?;
+    let blob = repo.find_blob(entry.id).ok()?;
+    Some((blob.content().to_vec(), blob.is_binary()))
+}
 
-    let mut out = String::new();
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        let origin = line.origin();
-        if origin == '+' || origin == '-' || origin == ' ' {
-            out.push(origin);
+fn bytes_to_string_opt(data: Option<(Vec<u8>, bool)>) -> (Option<String>, bool) {
+    match data {
+        Some((bytes, is_binary)) => {
+            if is_binary {
+                (None, true)
+            } else {
+                (Some(String::from_utf8_lossy(&bytes).to_string()), false)
+            }
         }
-        out.push_str(&String::from_utf8_lossy(line.content()));
-        true
-    })
-    .map_err(|e| e.to_string())?;
+        None => (None, false),
+    }
+}
 
-    Ok(out)
+fn is_binary_bytes(bytes: &[u8]) -> bool {
+    bytes.iter().take(8000).any(|&b| b == 0)
+}
+
+/// Builds the two sides of a diff for a single file.
+///
+/// `staged = false` (Changes section): compares the index (fallback HEAD) against
+/// the working-tree file, i.e. what `git diff` shows.
+/// `staged = true` (Staged Changes section): compares HEAD against the index,
+/// i.e. what `git diff --cached` shows.
+fn diff_content_for_path(
+    root_path: &str,
+    file_path: &str,
+    staged: bool,
+) -> Result<DiffContent, String> {
+    let repo = Repository::open(root_path).map_err(|e| e.to_string())?;
+    let rel = resolve_relative(&repo, root_path, file_path);
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+
+    if staged {
+        let head_data = head_tree
+            .as_ref()
+            .and_then(|t| blob_content_at_tree(&repo, t, &rel));
+        let index_data = blob_content_in_index(&repo, &rel);
+
+        let (original, orig_bin) = bytes_to_string_opt(head_data);
+        let (modified, mod_bin) = bytes_to_string_opt(index_data);
+        Ok(DiffContent {
+            original,
+            modified,
+            is_binary: orig_bin || mod_bin,
+        })
+    } else {
+        let index_data = blob_content_in_index(&repo, &rel);
+        let original_data = index_data
+            .or_else(|| head_tree.as_ref().and_then(|t| blob_content_at_tree(&repo, t, &rel)));
+        let (original, orig_bin) = bytes_to_string_opt(original_data);
+
+        let abs = PathBuf::from(root_path).join(&rel);
+        let (modified, mod_bin) = match std::fs::read(&abs) {
+            Ok(bytes) => {
+                if is_binary_bytes(&bytes) {
+                    (None, true)
+                } else {
+                    (Some(String::from_utf8_lossy(&bytes).to_string()), false)
+                }
+            }
+            Err(_) => (None, false),
+        };
+
+        Ok(DiffContent {
+            original,
+            modified,
+            is_binary: orig_bin || mod_bin,
+        })
+    }
 }
 
 fn stage_path(root_path: &str, file_path: &str) -> Result<(), String> {
@@ -386,8 +454,12 @@ pub fn git_status(root_path: String) -> Result<RepoStatus, String> {
 }
 
 #[tauri::command]
-pub fn git_diff(root_path: String, file_path: Option<String>) -> Result<String, String> {
-    diff_for_path(&root_path, file_path.as_deref())
+pub fn git_diff_content(
+    root_path: String,
+    file_path: String,
+    staged: bool,
+) -> Result<DiffContent, String> {
+    diff_content_for_path(&root_path, &file_path, staged)
 }
 
 #[tauri::command]
@@ -523,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_reports_modified_content() {
+    fn diff_content_reports_unstaged_changes() {
         let dir = init_repo();
         let root = dir.path().to_str().unwrap().to_string();
         let file_path = dir.path().join("a.txt").to_string_lossy().to_string();
@@ -532,7 +604,25 @@ mod tests {
         commit_changes(&root, "add a.txt").unwrap();
 
         fs::write(dir.path().join("a.txt"), "line1\nline2\n").unwrap();
-        let diff = diff_for_path(&root, Some(&file_path)).unwrap();
-        assert!(diff.contains("line2"));
+        let diff = diff_content_for_path(&root, &file_path, false).unwrap();
+        assert_eq!(diff.original.as_deref(), Some("line1\n"));
+        assert_eq!(diff.modified.as_deref(), Some("line1\nline2\n"));
+        assert!(!diff.is_binary);
+    }
+
+    #[test]
+    fn diff_content_reports_staged_changes() {
+        let dir = init_repo();
+        let root = dir.path().to_str().unwrap().to_string();
+        let file_path = dir.path().join("a.txt").to_string_lossy().to_string();
+        fs::write(dir.path().join("a.txt"), "line1\n").unwrap();
+        stage_path(&root, &file_path).unwrap();
+        commit_changes(&root, "add a.txt").unwrap();
+
+        fs::write(dir.path().join("a.txt"), "line1\nline2\n").unwrap();
+        stage_path(&root, &file_path).unwrap();
+        let diff = diff_content_for_path(&root, &file_path, true).unwrap();
+        assert_eq!(diff.original.as_deref(), Some("line1\n"));
+        assert_eq!(diff.modified.as_deref(), Some("line1\nline2\n"));
     }
 }

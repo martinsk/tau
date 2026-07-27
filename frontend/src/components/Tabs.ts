@@ -1,8 +1,15 @@
+export interface TabDiffInfo {
+  staged: boolean;
+  original: string;
+  editable: boolean;
+}
+
 export interface TabInfo {
   path: string;
   name: string;
   content: string;
   dirty: boolean;
+  diff?: TabDiffInfo;
 }
 
 export interface TabsAPI {

@@ -32,7 +32,7 @@ pub fn run() {
             pty::stop_agent_session,
             git::git_watch_repo,
             git::git_status,
-            git::git_diff,
+            git::git_diff_content,
             git::git_stage,
             git::git_unstage,
             git::git_commit,
