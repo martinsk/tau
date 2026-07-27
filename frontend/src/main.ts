@@ -67,6 +67,7 @@ import {
   taskCommand,
 } from "./tasks.js";
 import { LspManager } from "./lsp.js";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { registerCommands, runCommand } from "./commands.js";
 import { chordFromEvent, findBinding, type KeybindingMode } from "./keymaps.js";
 import { createCommandPalette } from "./components/CommandPalette.js";
@@ -794,6 +795,19 @@ function handleSetKeybindingMode(mode: KeybindingMode) {
   setKeybindingMode(mode);
 }
 
+async function handleToggleFullscreen() {
+  try {
+    const win = getCurrentWindow();
+    const isFullscreen = await win.isFullscreen();
+    await win.setFullscreen(!isFullscreen);
+  } catch (err) {
+    // Fullscreen control is unavailable outside a Tauri window (e.g. browser
+    // dev server), or the "core:window:allow-set-fullscreen"/
+    // "core:window:allow-is-fullscreen" capabilities are missing.
+    console.error("Failed to toggle fullscreen:", err);
+  }
+}
+
 /**
  * Registers every action in the app as a discoverable command so it shows
  * up in the command palette and can be bound via any keymap.
@@ -884,6 +898,11 @@ function registerAppCommands() {
       id: "pane.focusPrevious",
       title: "View: Focus Previous Editor Pane",
       run: () => focusPaneRelative(-1),
+    },
+    {
+      id: "view.toggleFullscreen",
+      title: "View: Toggle Fullscreen",
+      run: () => handleToggleFullscreen(),
     },
     {
       id: "keybindings.useDefault",

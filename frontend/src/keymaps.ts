@@ -55,6 +55,7 @@ export const DEFAULT_KEYMAP: KeyBinding[] = [
   { chord: "mod+shift+g", commandId: "view.focusSourceControl" },
   { chord: "mod+alt+]", commandId: "pane.focusNext" },
   { chord: "mod+alt+[", commandId: "pane.focusPrevious" },
+  { chord: "f11", commandId: "view.toggleFullscreen" },
 ];
 
 /**
