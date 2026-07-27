@@ -392,6 +392,13 @@ impl GitManager {
             return Ok(());
         }
 
+        // Note: on very large repositories, `compute_status`'s
+        // `recurse_untracked_dirs` walk can be relatively expensive. The
+        // 150ms debounce below coalesces bursts of filesystem events (e.g.
+        // from a build/watch process) into a single `git-status-changed`
+        // emit so the frontend doesn't request a fresh status per file
+        // write. If this becomes a bottleneck on huge repos, consider
+        // increasing the debounce window or capping untracked-dir depth.
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if res.is_ok() {

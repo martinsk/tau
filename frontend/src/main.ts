@@ -66,7 +66,7 @@ import {
   findTaskByLabel,
   taskCommand,
 } from "./tasks.js";
-import { LspManager } from "./lsp.js";
+import type { LspManager } from "./lsp.js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { registerCommands, runCommand } from "./commands.js";
 import { chordFromEvent, findBinding, type KeybindingMode } from "./keymaps.js";
@@ -298,7 +298,10 @@ async function openFolder(path: string) {
   }
 
   lspManager?.stop();
-  lspManager = new LspManager(path);
+  // `lsp.ts` pulls in `monaco-editor`; import it lazily so it doesn't add
+  // to the initial app bundle evaluation before a folder is opened.
+  const { LspManager: LspManagerClass } = await import("./lsp.js");
+  lspManager = new LspManagerClass(path);
   lspManager.loadSettings().then(() => {
     lspManager?.registerLanguageFeatures();
   });
@@ -347,21 +350,29 @@ function collectEditorPanes(root: PaneNode, acc: EditorPane[] = []): EditorPane[
 async function refreshOpenDiffTabs() {
   if (!state.rootPath) return;
   const rootPath = state.rootPath;
-  let changed = false;
-  for (const pane of collectEditorPanes(state.editorRoot)) {
-    for (const tab of pane.tabs) {
-      if (!tab.diff) continue;
+  const diffTabs = collectEditorPanes(state.editorRoot).flatMap((pane) =>
+    pane.tabs.filter((tab) => tab.diff)
+  );
+  const results = await Promise.all(
+    diffTabs.map(async (tab) => {
       try {
-        const diff = await gitDiffContent(rootPath, tab.path, tab.diff.staged);
-        tab.diff.original = diff.original ?? "";
-        if (!tab.dirty) {
-          tab.content = diff.modified ?? "";
-        }
-        changed = true;
+        const diff = await gitDiffContent(rootPath, tab.path, tab.diff!.staged);
+        return { tab, diff };
       } catch (err) {
         console.error("Failed to refresh diff:", err);
+        return null;
       }
+    })
+  );
+  let changed = false;
+  for (const result of results) {
+    if (!result) continue;
+    const { tab, diff } = result;
+    tab.diff!.original = diff.original ?? "";
+    if (!tab.dirty) {
+      tab.content = diff.modified ?? "";
     }
+    changed = true;
   }
   if (changed) updateLayout();
 }

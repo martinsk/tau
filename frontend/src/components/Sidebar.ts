@@ -62,6 +62,9 @@ export function createSidebar(
 
   let currentStatus = new Map<string, { staged: FileStatusKind | null; unstaged: FileStatusKind | null }>();
   const badgeEls = new Map<string, HTMLElement>();
+  // Tracks which directories are expanded so re-rendering the tree (e.g.
+  // reopening the same folder) doesn't collapse everything the user had open.
+  const expandedPaths = new Set<string>();
 
   function applyBadge(path: string, badge: HTMLElement) {
     const entry = currentStatus.get(path);
@@ -106,31 +109,44 @@ export function createSidebar(
       icon.innerHTML = getFileIcon(node.name, true, expanded);
     }
 
-    row.addEventListener("click", async () => {
-      expanded = !expanded;
+    async function expand() {
+      expanded = true;
+      expandedPaths.add(node.path);
       updateIcon();
-      if (expanded) {
-        arrow.style.transform = "rotate(90deg)";
-        childrenContainer.style.display = "block";
-        if (!loaded) {
-          try {
-            const children = await readDir(node.path);
-            loaded = true;
-            for (const child of children) {
-              renderNode(child, depth + 1, childrenContainer);
-            }
-          } catch (err) {
-            console.error("Failed to read directory:", err);
+      arrow.style.transform = "rotate(90deg)";
+      childrenContainer.style.display = "block";
+      if (!loaded) {
+        try {
+          const children = await readDir(node.path);
+          loaded = true;
+          for (const child of children) {
+            renderNode(child, depth + 1, childrenContainer);
           }
+        } catch (err) {
+          console.error("Failed to read directory:", err);
         }
-      } else {
-        arrow.style.transform = "";
-        childrenContainer.style.display = "none";
       }
+    }
+
+    function collapse() {
+      expanded = false;
+      expandedPaths.delete(node.path);
+      updateIcon();
+      arrow.style.transform = "";
+      childrenContainer.style.display = "none";
+    }
+
+    row.addEventListener("click", () => {
+      if (expanded) collapse();
+      else expand();
     });
 
     container.appendChild(row);
     container.appendChild(childrenContainer);
+
+    if (expandedPaths.has(node.path)) {
+      expand();
+    }
   }
 
   function renderFile(node: FileNode, depth: number, container: HTMLElement) {

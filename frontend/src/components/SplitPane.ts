@@ -1,5 +1,6 @@
 export interface SplitPaneAPI {
   element: HTMLElement;
+  dispose: () => void;
 }
 
 export function createSplitPane(
@@ -12,6 +13,7 @@ export function createSplitPane(
 
   const total = sizes.reduce((a, b) => a + b, 0) || 1;
   const wrappers: HTMLElement[] = [];
+  const disposers: (() => void)[] = [];
 
   for (let i = 0; i < children.length; i++) {
     const wrapper = document.createElement("div");
@@ -30,15 +32,14 @@ export function createSplitPane(
       container.appendChild(divider);
 
       let isDragging = false;
-      divider.addEventListener("mousedown", (e) => {
+      const onMouseDown = (e: MouseEvent) => {
         e.preventDefault();
         isDragging = true;
         document.body.style.cursor =
           direction === "row" ? "col-resize" : "row-resize";
         document.body.style.userSelect = "none";
-      });
-
-      document.addEventListener("mousemove", (e) => {
+      };
+      const onMouseMove = (e: MouseEvent) => {
         if (!isDragging) return;
         const rect = container.getBoundingClientRect();
         let ratio: number;
@@ -49,13 +50,22 @@ export function createSplitPane(
         }
         const clamped = Math.max(0.05, Math.min(0.95, ratio));
         applySizes(wrappers, clamped, i);
-      });
-
-      document.addEventListener("mouseup", () => {
+      };
+      const onMouseUp = () => {
         if (!isDragging) return;
         isDragging = false;
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+      };
+
+      divider.addEventListener("mousedown", onMouseDown);
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+
+      disposers.push(() => {
+        divider.removeEventListener("mousedown", onMouseDown);
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
       });
     }
   }
@@ -79,5 +89,10 @@ export function createSplitPane(
     }
   }
 
-  return { element: container };
+  function dispose() {
+    for (const d of disposers) d();
+    disposers.length = 0;
+  }
+
+  return { element: container, dispose };
 }

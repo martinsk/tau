@@ -25,6 +25,30 @@ self.MonacoEnvironment = {
   },
 };
 
+let languagesWarmed = false;
+function warmLanguagesOnce() {
+  if (languagesWarmed) return;
+  languagesWarmed = true;
+  setTimeout(() => {
+    const languages = [
+      "rust",
+      "typescript",
+      "javascript",
+      "json",
+      "html",
+      "css",
+      "markdown",
+      "python",
+      "ini",
+    ];
+    for (const language of languages) {
+      try {
+        monaco.editor.createModel("", language).dispose();
+      } catch {}
+    }
+  }, 0);
+}
+
 monaco.editor.defineTheme("tau-dark", {
   base: "vs-dark",
   inherit: true,
@@ -158,33 +182,34 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
   diffEditorEl.style.visibility = "hidden";
   editorEl.appendChild(diffEditorEl);
 
-  const diffEditor = monaco.editor.createDiffEditor(diffEditorEl, {
-    theme: "tau-dark",
-    automaticLayout: true,
-    minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    renderValidationDecorations: "off",
-    originalEditable: false,
-  });
+  // The diff editor is expensive to construct, so it's only created lazily
+  // the first time a diff tab is actually opened (see `ensureDiffEditor`).
+  let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
 
-  setTimeout(() => {
-    const languages = [
-      "rust",
-      "typescript",
-      "javascript",
-      "json",
-      "html",
-      "css",
-      "markdown",
-      "python",
-      "ini",
-    ];
-    for (const language of languages) {
-      try {
-        monaco.editor.createModel("", language).dispose();
-      } catch {}
-    }
-  }, 0);
+  function ensureDiffEditor(): monaco.editor.IStandaloneDiffEditor {
+    if (diffEditor) return diffEditor;
+    diffEditor = monaco.editor.createDiffEditor(diffEditorEl, {
+      theme: "tau-dark",
+      automaticLayout: true,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      renderValidationDecorations: "off",
+      originalEditable: false,
+    });
+    diffEditor.getModifiedEditor().onDidChangeModelContent(() => {
+      if (isSettingValue) return;
+      onContentChange(diffEditor!.getModifiedEditor().getValue());
+    });
+    diffEditor.getModifiedEditor().addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+      () => {
+        onSave();
+      }
+    );
+    return diffEditor;
+  }
+
+  warmLanguagesOnce();
 
   let isSettingValue = false;
   let activePath: string | null = null;
@@ -202,18 +227,6 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     onSave();
   });
-
-  diffEditor.getModifiedEditor().onDidChangeModelContent(() => {
-    if (isSettingValue) return;
-    onContentChange(diffEditor.getModifiedEditor().getValue());
-  });
-
-  diffEditor.getModifiedEditor().addCommand(
-    monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-    () => {
-      onSave();
-    }
-  );
 
   function updateTabs(tabs: TabInfo[], active: string | null) {
     activePath = active;
@@ -347,11 +360,12 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
         modifiedModel = diffModifiedModel!;
       }
 
-      const currentModel = diffEditor.getModel();
+      const diff = ensureDiffEditor();
+      const currentModel = diff.getModel();
       if (!currentModel || currentModel.original !== diffOriginalModel || currentModel.modified !== modifiedModel) {
-        diffEditor.setModel({ original: diffOriginalModel!, modified: modifiedModel });
+        diff.setModel({ original: diffOriginalModel!, modified: modifiedModel });
       }
-      diffEditor.updateOptions({ readOnly: !tab.diff.editable });
+      diff.updateOptions({ readOnly: !tab.diff.editable });
       return;
     }
 
@@ -380,7 +394,7 @@ export function createEditorPane(callbacks: EditorPaneCallbacks): EditorPaneAPI 
   }
 
   function getContent() {
-    return activeIsDiff ? diffEditor.getModifiedEditor().getValue() : editor.getValue();
+    return activeIsDiff && diffEditor ? diffEditor.getModifiedEditor().getValue() : editor.getValue();
   }
 
   function focus() {

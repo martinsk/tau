@@ -1,8 +1,8 @@
 import { createTitleBar } from "./TitleBar.js";
 import { createSidebar } from "./Sidebar.js";
-import { createEditorPane, type EditorPaneAPI } from "./EditorPane.js";
+import type { EditorPaneAPI } from "./EditorPane.js";
 import type { DropZone } from "./PaneDropOverlay.js";
-import { createSplitPane } from "./SplitPane.js";
+import { createSplitPane, type SplitPaneAPI } from "./SplitPane.js";
 import {
   createTerminalManager,
   type TerminalInfo,
@@ -78,7 +78,7 @@ export interface LayoutCallbacks {
 export interface LayoutAPI {
   element: HTMLElement;
   updateTree: (nodes: FileNode[]) => void;
-  updateEditorRoot: (root: PaneNode, activePaneId: string) => void;
+  updateEditorRoot: (root: PaneNode, activePaneId: string) => Promise<void>;
   updatePaneTabs: (paneId: string) => void;
   updateTerminals: (state: TerminalState) => void;
   getPaneContent: (paneId: string) => string;
@@ -274,32 +274,52 @@ export function createLayout(
 
   let currentRoot: PaneNode | null = null;
   const editorPanes = new Map<string, EditorPaneAPI>();
+  let activeSplitPanes: SplitPaneAPI[] = [];
 
-  function getOrCreateEditorPane(pane: EditorPane): EditorPaneAPI {
+  // `monaco-editor` is heavy; the module is only fetched/evaluated lazily on
+  // first pane creation so it doesn't block the initial app shell paint.
+  let editorPaneModulePromise: Promise<typeof import("./EditorPane.js")> | null = null;
+  function loadEditorPaneModule(): Promise<typeof import("./EditorPane.js")> {
+    if (!editorPaneModulePromise) {
+      editorPaneModulePromise = import("./EditorPane.js");
+    }
+    return editorPaneModulePromise;
+  }
+
+  async function getOrCreateEditorPane(pane: EditorPane): Promise<EditorPaneAPI> {
     let api = editorPanes.get(pane.id);
     if (!api) {
-      api = createEditorPane({
-        paneId: pane.id,
-        onTabClick: (path: string) => callbacks.onTabClick(pane.id, path),
-        onTabClose: (path: string) => callbacks.onTabClose(pane.id, path),
-        onContentChange: (content: string) =>
-          callbacks.onContentChange(pane.id, content),
-        onSave: () => callbacks.onSave(pane.id),
-        onFocus: () => callbacks.onPaneFocus(pane.id),
-        onTabDrop: (data: string) => callbacks.onTabDrop(pane.id, data),
-        onSplitRequest: (direction: DropZone, data?: string) =>
-          callbacks.onSplitDrop(pane.id, direction, data),
-        onFileDrop: (path: string, name: string, zone: DropZone) =>
-          callbacks.onFileDrop(pane.id, path, name, zone),
-      });
-      editorPanes.set(pane.id, api);
+      const { createEditorPane } = await loadEditorPaneModule();
+      // Another concurrent render may have created this pane while we
+      // were awaiting the module import.
+      api = editorPanes.get(pane.id);
+      if (!api) {
+        api = createEditorPane({
+          paneId: pane.id,
+          onTabClick: (path: string) => callbacks.onTabClick(pane.id, path),
+          onTabClose: (path: string) => callbacks.onTabClose(pane.id, path),
+          onContentChange: (content: string) =>
+            callbacks.onContentChange(pane.id, content),
+          onSave: () => callbacks.onSave(pane.id),
+          onFocus: () => callbacks.onPaneFocus(pane.id),
+          onTabDrop: (data: string) => callbacks.onTabDrop(pane.id, data),
+          onSplitRequest: (direction: DropZone, data?: string) =>
+            callbacks.onSplitDrop(pane.id, direction, data),
+          onFileDrop: (path: string, name: string, zone: DropZone) =>
+            callbacks.onFileDrop(pane.id, path, name, zone),
+        });
+        editorPanes.set(pane.id, api);
+      }
     }
     return api;
   }
 
-  function renderPane(node: PaneNode): HTMLElement {
+  async function renderPane(
+    node: PaneNode,
+    newSplitPanes: SplitPaneAPI[]
+  ): Promise<HTMLElement> {
     if (node.type === "editor") {
-      const api = getOrCreateEditorPane(node);
+      const api = await getOrCreateEditorPane(node);
       const tabs = node.tabs;
       const active = node.activeTab;
       api.updateTabs(tabs, active?.path ?? null);
@@ -307,12 +327,15 @@ export function createLayout(
       return api.element;
     }
 
-    const children = node.children.map(renderPane);
+    const children = await Promise.all(
+      node.children.map((child) => renderPane(child, newSplitPanes))
+    );
     const split = createSplitPane(
       node.direction,
       children,
       node.children.map(() => 1)
     );
+    newSplitPanes.push(split);
     return split.element;
   }
 
@@ -331,11 +354,25 @@ export function createLayout(
     }
   }
 
-  function updateEditorRoot(root: PaneNode, activePaneId: string) {
+  let editorRootRenderVersion = 0;
+
+  async function updateEditorRoot(root: PaneNode, activePaneId: string) {
     currentRoot = root;
     cleanupRemovedPanes(root);
+    const version = ++editorRootRenderVersion;
+    const newSplitPanes: SplitPaneAPI[] = [];
+    const rendered = await renderPane(root, newSplitPanes);
+    // If another `updateEditorRoot` call started (and possibly finished)
+    // while this one was awaiting the lazy editor module, discard this
+    // stale render instead of clobbering the newer state.
+    if (version !== editorRootRenderVersion) {
+      for (const split of newSplitPanes) split.dispose();
+      return;
+    }
+    for (const split of activeSplitPanes) split.dispose();
+    activeSplitPanes = newSplitPanes;
     editorContainer.innerHTML = "";
-    editorContainer.appendChild(renderPane(root));
+    editorContainer.appendChild(rendered);
     statusBar.updatePath(getActivePath(root, activePaneId) ?? "Ready");
   }
 
