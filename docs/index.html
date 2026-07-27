@@ -3,17 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tau — A simple editor, built to explore</title>
+    <title>Tau — An editor that feels like home</title>
     <meta
       name="description"
-      content="Tau is a proof-of-concept code editor built with Rust and Tauri."
+      content="Tau is a fast, minimal desktop code editor built with Rust and Tauri. Browse, edit, run, and ship — with a terminal, git, and an AI agent by your side."
     />
+    <meta property="og:title" content="Tau — An editor that feels like home" />
+    <meta
+      property="og:description"
+      content="A fast, minimal desktop code editor built with Rust and Tauri."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/png" href="favicon.png" />
     <link rel="stylesheet" href="style.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
   </head>
@@ -31,90 +38,226 @@
       <section class="hero">
         <div class="container hero-container">
           <div class="hero-content">
-            <h1>A simple editor, built to explore.</h1>
+            <div class="hero-eyebrow">Built with Rust & Tauri</div>
+            <h1>An editor that feels like home.</h1>
             <p class="lead">
-              Tau is a proof-of-concept desktop code editor. It lets you browse
-              a project, open files in tabs, edit with Monaco, and run commands
-              in an integrated terminal.
+              Tau brings the fun back into writing code. It is a fast, calm
+              desktop editor that puts your ideas first — so you can explore,
+              experiment, and ship without the noise of a heavy IDE.
             </p>
-            <a
-              href="https://github.com/martinsk/tau"
-              class="button"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              View on GitHub
-            </a>
+            <div class="hero-actions">
+              <a
+                href="https://github.com/martinsk/tau"
+                class="button button--primary"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View on GitHub
+              </a>
+              <a href="#screenshots" class="button button--secondary">
+                See it in action
+              </a>
+            </div>
           </div>
-          <img
-            class="hero-icon"
-            src="favicon.png"
-            alt=""
-            width="160"
-            height="160"
-          />
+          <div class="hero-visual" aria-hidden="true">
+            <div class="code-window">
+              <div class="code-window-header">
+                <span class="code-window-dot"></span>
+                <span class="code-window-dot"></span>
+                <span class="code-window-dot"></span>
+                <span class="code-window-title">main.rs</span>
+              </div>
+              <div class="code-window-body">
+                <pre><code><span class="code-keyword">fn</span> <span class="code-function">main</span>() {
+    <span class="code-comment">// start exploring</span>
+    <span class="code-function">println!</span>(<span class="code-string">"Hello, Tau."</span>);
+}</code></pre>
+              </div>
+            </div>
+            <img
+              class="hero-icon"
+              src="favicon.png"
+              alt=""
+              width="160"
+              height="160"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--values">
+        <div class="container">
+          <div class="value-grid">
+            <article class="value-card">
+              <div class="value-icon">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              </div>
+              <h3>Stays out of your way</h3>
+              <p>Fast enough that you forget the editor is there, so you can stay lost in the code.</p>
+            </article>
+            <article class="value-card">
+              <div class="value-icon">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+              </div>
+              <h3>Keeps you in flow</h3>
+              <p>Everything you need in one window — no tab hunting, no context switching, no clutter.</p>
+            </article>
+            <article class="value-card">
+              <div class="value-icon">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              </div>
+              <h3>Yours to play with</h3>
+              <p>Open source and built with familiar tech, so you can shape it to fit how you work.</p>
+            </article>
+          </div>
         </div>
       </section>
 
       <section class="section">
         <div class="container">
-          <h2>What it does</h2>
-          <ul class="feature-list">
-            <li>Browse files in a sidebar explorer.</li>
-            <li>Open files in tabs and split panes.</li>
-            <li>Edit code with syntax highlighting and LSP support.</li>
-            <li>Run shell tasks in a built-in terminal panel.</li>
-            <li>Stage, commit, and view diffs with built-in git support.</li>
-            <li>Run a coding agent like Claude Code in a dedicated panel.</li>
-          </ul>
+          <h2>Made for the joy of coding</h2>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <h3>Project explorer</h3>
+              <p>Jump around your project without losing momentum. A clean sidebar keeps your files one click away.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Tabs & split panes</h3>
+              <p>Keep many files in view at once and arrange your workspace the way your brain likes it.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Smart editing</h3>
+              <p>Syntax highlighting, diagnostics, and language-server smarts for your favorite stack.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Integrated terminal</h3>
+              <p>Run tests, servers, and one-off commands without breaking your rhythm.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Git source control</h3>
+              <p>Review changes, stage, and commit from the same window — so ideas move smoothly from head to repo.</p>
+            </article>
+            <article class="feature-card">
+              <h3>AI agent panel</h3>
+              <p>Pair with Claude Code when you want a sounding board, a helper, or a fresh perspective.</p>
+            </article>
+          </div>
         </div>
       </section>
 
-      <section class="section section--screenshot">
+      <section class="section section--screenshots" id="screenshots">
         <div class="container container--wide">
-          <h2>Current interface</h2>
-          <figure class="screenshot">
-            <img
-              src="tau-screenshot.png"
-              alt="The Tau editor with a file tree, open tabs, code editing, and a terminal panel."
-              width="1200"
-              height="834"
-              loading="lazy"
-            />
-            <figcaption>Browsing and editing a project.</figcaption>
-          </figure>
+          <h2>See it in action</h2>
+          <div class="screenshot-gallery">
+            <div class="screenshot-tabs" role="tablist" aria-label="Screenshot gallery">
+              <button class="screenshot-tab is-active" data-screenshot-tab="editor" role="tab" aria-selected="true" type="button">
+                Editor
+              </button>
+              <button class="screenshot-tab" data-screenshot-tab="git" role="tab" aria-selected="false" type="button">
+                Source control
+              </button>
+              <button class="screenshot-tab" data-screenshot-tab="agent" role="tab" aria-selected="false" type="button">
+                Agent
+              </button>
+            </div>
+
+            <div class="screenshot-panes">
+              <figure class="screenshot-pane is-active" data-screenshot-pane="editor">
+                <div class="screenshot-frame">
+                  <img
+                    src="tau-screenshot.png"
+                    alt="The Tau editor with a file tree, open tabs, code editing, and a terminal panel."
+                    width="1200"
+                    height="834"
+                    loading="lazy"
+                  />
+                </div>
+                <figcaption>Browsing and editing a project.</figcaption>
+              </figure>
+              <figure class="screenshot-pane" data-screenshot-pane="git">
+                <div class="screenshot-frame">
+                  <img
+                    src="tau-screenshot-source-control.png"
+                    alt="The Tau source control panel showing staged and unstaged changes, a commit box, and an inline diff view."
+                    width="1200"
+                    height="834"
+                    loading="lazy"
+                  />
+                </div>
+                <figcaption>Staging, committing, and reviewing diffs.</figcaption>
+              </figure>
+              <figure class="screenshot-pane" data-screenshot-pane="agent">
+                <div class="screenshot-frame">
+                  <img
+                    src="tau-screenshot-agent.png"
+                    alt="The Tau agent panel running a Claude Code session alongside the editor and terminal."
+                    width="1200"
+                    height="769"
+                    loading="lazy"
+                  />
+                </div>
+                <figcaption>Running Claude Code in a dedicated panel.</figcaption>
+              </figure>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="section section--screenshot">
+      <section class="section section--install">
         <div class="container container--wide">
-          <h2>Source control</h2>
-          <figure class="screenshot">
-            <img
-              src="tau-screenshot-source-control.png"
-              alt="The Tau source control panel showing staged and unstaged changes, a commit box, and an inline diff view."
-              width="1200"
-              height="834"
-              loading="lazy"
-            />
-            <figcaption>Staging, committing, and reviewing diffs.</figcaption>
-          </figure>
+          <div class="install-card">
+            <div class="install-content">
+              <h2>Start exploring in minutes</h2>
+              <p>
+                Tau is ready to hack on. Clone it, build it, and open a folder —
+                then see how it feels to code again.
+              </p>
+              <a
+                href="https://github.com/martinsk/tau"
+                class="button button--primary"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Get the code on GitHub
+              </a>
+            </div>
+            <div class="install-terminal">
+              <div class="code-window code-window--small">
+                <div class="code-window-header">
+                  <span class="code-window-dot"></span>
+                  <span class="code-window-dot"></span>
+                  <span class="code-window-dot"></span>
+                  <span class="code-window-title">terminal</span>
+                </div>
+                <div class="code-window-body">
+                  <pre><code><span class="code-prompt">$</span> git clone https://github.com/martinsk/tau.git
+<span class="code-prompt">$</span> cd tau
+<span class="code-prompt">$</span> npm install --prefix frontend
+<span class="code-prompt">$</span> npm run dev</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="section section--screenshot">
-        <div class="container container--wide">
-          <h2>Built-in coding agent</h2>
-          <figure class="screenshot">
-            <img
-              src="tau-screenshot-agent.png"
-              alt="The Tau agent panel running a Claude Code session alongside the editor and terminal."
-              width="1200"
-              height="769"
-              loading="lazy"
-            />
-            <figcaption>Running Claude Code in a dedicated panel.</figcaption>
-          </figure>
+      <section class="section">
+        <div class="container container--narrow">
+          <div class="contribute-card">
+            <h2>Open source, built to explore</h2>
+            <p>
+              Tau is a learning project made for curious developers. Ideas,
+              issues, and experiments are welcome.
+            </p>
+            <a
+              href="https://github.com/martinsk/tau"
+              class="button button--secondary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Contribute on GitHub
+            </a>
+          </div>
         </div>
       </section>
     </main>
@@ -140,8 +283,10 @@
             LinkedIn
           </a>
         </p>
-        <p class="footer-line footer-line--subtle">proof of concept</p>
+        <p class="footer-line footer-line--subtle">proof of concept · MIT</p>
       </div>
     </footer>
+
+    <script src="main.js"></script>
   </body>
 </html>

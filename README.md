@@ -1,6 +1,13 @@
 # Tau
 
-A minimal multi-pane code editor with an integrated terminal.
+An editor that feels like home. Tau is a fast, minimal desktop code editor built with Rust and Tauri — made to bring the fun back into writing code.
+
+- Explore your project in a clean sidebar
+- Arrange files in tabs and split panes
+- Edit with syntax highlighting, diagnostics, and LSP support
+- Run commands in an integrated terminal
+- Stage, commit, and review diffs with built-in git support
+- Pair with Claude Code in a dedicated agent panel
 
 ## Build from source
 
