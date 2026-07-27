@@ -24,6 +24,7 @@ export interface AgentPanelAPI {
 export function createAgentPanel(callbacks: AgentPanelCallbacks): AgentPanelAPI {
   const panel = document.createElement("aside");
   panel.className = "h-full w-full min-w-0 bg-tau-sidebar border-l border-tau-border flex flex-col";
+  panel.style.cssText = "height: 100%; min-height: 0;";
 
   const header = document.createElement("div");
   header.className = "h-10 px-3 border-b border-tau-border flex items-center justify-between shrink-0";
@@ -66,7 +67,8 @@ export function createAgentPanel(callbacks: AgentPanelCallbacks): AgentPanelAPI 
   controls.append(select, program, args, error, actions);
 
   const terminalHost = document.createElement("div");
-  terminalHost.className = "flex-1 min-h-0 relative";
+  terminalHost.className = "flex-1 min-h-0 relative overflow-hidden";
+  terminalHost.style.cssText = "flex: 1 1 0%; min-height: 0;";
   const empty = document.createElement("div");
   empty.className = "absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-tau-muted";
   empty.textContent = "Start a locally authenticated coding harness in this workspace.";
@@ -77,6 +79,8 @@ export function createAgentPanel(callbacks: AgentPanelCallbacks): AgentPanelAPI 
   let currentConfig: HarnessConfig = harnessPresets[0];
   let terminal: TerminalAPI | null = null;
   let activeSessionId: string | null = null;
+  const terminalResizeObserver = new ResizeObserver(() => terminal?.fit());
+  terminalResizeObserver.observe(terminalHost);
 
   function displayConfig(config: HarnessConfig) {
     currentConfig = config;
@@ -157,9 +161,9 @@ export function createAgentPanel(callbacks: AgentPanelCallbacks): AgentPanelAPI 
       args: currentConfig.args,
       agent: true,
     });
-    terminal.element.style.cssText = "position: absolute; inset: 0;";
+    terminal.element.style.cssText = "position: absolute; inset: 0; height: 100%; width: 100%;";
     terminalHost.appendChild(terminal.element);
-    terminal.fit();
+    requestAnimationFrame(() => terminal?.fit());
   }
 
   async function dispose() {
@@ -170,6 +174,7 @@ export function createAgentPanel(callbacks: AgentPanelCallbacks): AgentPanelAPI 
       terminal.dispose();
       terminal = null;
     }
+    terminalResizeObserver.disconnect();
     if (sessionId) await stopAgentSession(sessionId).catch(console.error);
   }
 

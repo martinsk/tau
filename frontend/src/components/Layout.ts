@@ -242,7 +242,7 @@ export function createLayout(
     },
   });
   const agentContainer = document.createElement("div");
-  agentContainer.className = "flex shrink-0 min-w-0";
+  agentContainer.className = "flex h-full shrink-0 min-w-0";
   agentContainer.append(agentResizer.element, agentPanel.element);
   agentContainer.classList.toggle("hidden", !options.agentVisible);
 
