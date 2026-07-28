@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
+use portable_pty::{CommandBuilder, PtyPair, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -35,10 +35,7 @@ pub fn terminal_resize(
 }
 
 #[tauri::command]
-pub fn kill_terminal(
-    id: String,
-    state: tauri::State<'_, PtyManager>,
-) -> Result<(), String> {
+pub fn kill_terminal(id: String, state: tauri::State<'_, PtyManager>) -> Result<(), String> {
     state.kill(id)
 }
 
@@ -74,10 +71,7 @@ pub fn resize_agent_session(
 }
 
 #[tauri::command]
-pub fn stop_agent_session(
-    id: String,
-    state: tauri::State<'_, PtyManager>,
-) -> Result<(), String> {
+pub fn stop_agent_session(id: String, state: tauri::State<'_, PtyManager>) -> Result<(), String> {
     state.kill(id)
 }
 
@@ -265,11 +259,9 @@ impl PtyManager {
                 return Err("terminal already exists".into());
             }
         }
-        let spawned = self.backend.spawn_command(
-            &program,
-            &args,
-            &canonical_cwd.to_string_lossy(),
-        )?;
+        let spawned =
+            self.backend
+                .spawn_command(&program, &args, &canonical_cwd.to_string_lossy())?;
         self.register(id, spawned, app)
     }
 
@@ -420,22 +412,17 @@ mod tests {
             )
         }
 
-        fn spawn(
-            self,
-            _shell: &str,
-            _cwd: &str,
-        ) -> (SpawnedProcess, FakeProcessBackend<Spawned>) {
+        fn spawn(self, _shell: &str, _cwd: &str) -> (SpawnedProcess, FakeProcessBackend<Spawned>) {
             let reader = Box::new(ChannelReader {
                 rx: self.state.rx,
                 pending: Vec::new(),
                 pos: 0,
             });
-            let session: Arc<Mutex<dyn ProcessSession + Send>> = Arc::new(Mutex::new(
-                FakeProcessSession {
+            let session: Arc<Mutex<dyn ProcessSession + Send>> =
+                Arc::new(Mutex::new(FakeProcessSession {
                     input: self.input.clone(),
                     killed: self.killed.clone(),
-                },
-            ));
+                }));
             let spawned_backend = FakeProcessBackend {
                 input: self.input,
                 killed: self.killed,
@@ -470,12 +457,7 @@ mod tests {
         let (backend, handle) = FakeProcessBackend::new();
         let (spawned, _spawned_backend) = backend.spawn("sh", "/");
 
-        spawned
-            .session
-            .lock()
-            .unwrap()
-            .write(b"hello")
-            .unwrap();
+        spawned.session.lock().unwrap().write(b"hello").unwrap();
         assert_eq!(handle.input(), b"hello");
 
         handle.send_output(b"world");
@@ -492,12 +474,7 @@ mod tests {
     fn spawned_backend_preserves_kill_and_input_state() {
         let (backend, handle) = FakeProcessBackend::new();
         let (spawned, _spawned_backend) = backend.spawn("sh", "/");
-        spawned
-            .session
-            .lock()
-            .unwrap()
-            .kill()
-            .unwrap();
+        spawned.session.lock().unwrap().kill().unwrap();
         assert!(handle.killed());
     }
 }

@@ -22,16 +22,26 @@ function normalizeGroup(
   return group.kind;
 }
 
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
 export function taskCommand(task: Task): string {
-  const args = task.args ?? [];
-  return [task.command, ...args].join(" ");
+  return [task.command, ...(task.args ?? [])].map(shellQuote).join(" ");
 }
 
 export async function loadTasks(rootPath: string): Promise<Task[]> {
   try {
     const raw = await readFile(`${rootPath}/.vscode/tasks.json`);
     const config = JSON.parse(raw) as TasksConfig;
-    return config.tasks ?? [];
+    if (!Array.isArray(config.tasks)) return [];
+    return config.tasks.filter(
+      (task): task is Task =>
+        typeof task?.label === "string" &&
+        typeof task.command === "string" &&
+        (!task.args || task.args.every((argument) => typeof argument === "string"))
+    );
   } catch {
     return [];
   }

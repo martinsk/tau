@@ -39,7 +39,11 @@ export function chordFromEvent(e: KeyboardEvent): string | null {
  */
 export const DEFAULT_KEYMAP: KeyBinding[] = [
   { chord: "mod+shift+p", commandId: "commandPalette.open" },
+  { chord: "mod+p", commandId: "file.quickOpen" },
+  { chord: "mod+n", commandId: "file.new" },
   { chord: "mod+s", commandId: "file.save" },
+  { chord: "mod+shift+s", commandId: "file.saveAs" },
+  { chord: "mod+alt+s", commandId: "file.saveAll" },
   { chord: "mod+shift+o", commandId: "file.openFolder" },
   { chord: "mod+w", commandId: "tab.close" },
   { chord: "mod+2", commandId: "view.splitHorizontal" },

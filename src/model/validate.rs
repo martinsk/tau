@@ -4,15 +4,35 @@ use crate::model::{ContainerId, ItemId, Project, ReferenceId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValidationError {
-    MissingContainer { id: ContainerId },
-    MissingItem { id: ItemId },
-    DuplicateContainer { id: ContainerId },
-    DuplicateItem { id: ItemId },
-    DuplicateReference { id: ReferenceId },
-    OrphanContainer { id: ContainerId },
-    RootHasParent { id: ContainerId, parents: Vec<ContainerId> },
-    MultipleParents { id: ContainerId, parents: Vec<ContainerId> },
-    CycleInContainerGraph { ids: Vec<ContainerId> },
+    MissingContainer {
+        id: ContainerId,
+    },
+    MissingItem {
+        id: ItemId,
+    },
+    DuplicateContainer {
+        id: ContainerId,
+    },
+    DuplicateItem {
+        id: ItemId,
+    },
+    DuplicateReference {
+        id: ReferenceId,
+    },
+    OrphanContainer {
+        id: ContainerId,
+    },
+    RootHasParent {
+        id: ContainerId,
+        parents: Vec<ContainerId>,
+    },
+    MultipleParents {
+        id: ContainerId,
+        parents: Vec<ContainerId>,
+    },
+    CycleInContainerGraph {
+        ids: Vec<ContainerId>,
+    },
 }
 
 pub fn validate(project: &Project) -> Vec<ValidationError> {
@@ -54,10 +74,14 @@ fn check_container_items_exist(project: &Project, errors: &mut Vec<ValidationErr
 fn check_references_exist(project: &Project, errors: &mut Vec<ValidationError>) {
     for reference in project.references.values() {
         if !project.items.contains_key(&reference.source) {
-            errors.push(ValidationError::MissingItem { id: reference.source });
+            errors.push(ValidationError::MissingItem {
+                id: reference.source,
+            });
         }
         if !project.items.contains_key(&reference.target) {
-            errors.push(ValidationError::MissingItem { id: reference.target });
+            errors.push(ValidationError::MissingItem {
+                id: reference.target,
+            });
         }
     }
 }
@@ -93,9 +117,7 @@ fn check_container_tree(project: &Project, errors: &mut Vec<ValidationError>) {
     let mut stack = vec![project.root];
     while let Some(current) = stack.pop() {
         if !visited.insert(current) {
-            errors.push(ValidationError::CycleInContainerGraph {
-                ids: vec![current],
-            });
+            errors.push(ValidationError::CycleInContainerGraph { ids: vec![current] });
             continue;
         }
         if let Some(container) = project.containers.get(&current) {
@@ -115,7 +137,10 @@ fn check_container_tree(project: &Project, errors: &mut Vec<ValidationError>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Container, ContainerId, Content, Item, ItemId, ItemKind, Metadata, Project, ProjectId, Reference, ReferenceId, ReferenceKind};
+    use crate::model::{
+        Container, ContainerId, Content, Item, ItemId, ItemKind, Metadata, Project, ProjectId,
+        Reference, ReferenceId, ReferenceKind,
+    };
 
     fn empty_project() -> Project {
         Project::new(ProjectId(1), "test", ContainerId(10))
@@ -138,7 +163,9 @@ mod tests {
             .containers
             .push(ContainerId(99));
         let errors = validate(&project);
-        assert!(errors.contains(&ValidationError::MissingContainer { id: ContainerId(99) }));
+        assert!(errors.contains(&ValidationError::MissingContainer {
+            id: ContainerId(99)
+        }));
     }
 
     #[test]
@@ -193,7 +220,9 @@ mod tests {
             },
         );
         let errors = validate(&project);
-        assert!(errors.contains(&ValidationError::OrphanContainer { id: ContainerId(20) }));
+        assert!(errors.contains(&ValidationError::OrphanContainer {
+            id: ContainerId(20)
+        }));
     }
 
     #[test]
@@ -228,7 +257,9 @@ mod tests {
 
         let errors = validate(&project);
         assert!(
-            errors.iter().any(|e| matches!(e, ValidationError::CycleInContainerGraph { .. })),
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::CycleInContainerGraph { .. })),
             "expected cycle error, got {errors:?}"
         );
     }

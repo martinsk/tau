@@ -1,4 +1,9 @@
-import { getCommands, runCommand, type Command } from "../commands.js";
+import {
+  getCommands,
+  isCommandEnabled,
+  runCommand,
+  type Command,
+} from "../commands.js";
 import { getKeymap, type KeybindingMode } from "../keymaps.js";
 
 export interface CommandPaletteAPI {
@@ -56,10 +61,13 @@ export function createCommandPalette(
 
   function itemEl(command: Command, index: number): HTMLElement {
     const row = document.createElement("div");
-    row.className = `px-3 py-1.5 flex items-center justify-between gap-3 text-sm cursor-pointer ${
-      index === selectedIndex
-        ? "bg-tau-active text-tau-fg"
-        : "text-tau-fg hover:bg-tau-active-hover"
+    const enabled = isCommandEnabled(command);
+    row.className = `px-3 py-1.5 flex items-center justify-between gap-3 text-sm ${
+      !enabled
+        ? "text-tau-muted opacity-50 cursor-not-allowed"
+        : index === selectedIndex
+          ? "bg-tau-active text-tau-fg cursor-pointer"
+          : "text-tau-fg hover:bg-tau-active-hover cursor-pointer"
     }`;
 
     const title = document.createElement("span");
@@ -79,7 +87,7 @@ export function createCommandPalette(
 
     row.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      execute(command);
+      if (enabled) execute(command);
     });
     return row;
   }
@@ -109,8 +117,9 @@ export function createCommandPalette(
   }
 
   function execute(command: Command) {
+    if (!isCommandEnabled(command)) return;
     close();
-    runCommand(command.id);
+    void runCommand(command.id);
   }
 
   function open() {

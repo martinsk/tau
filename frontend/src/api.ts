@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 export interface FileNode {
   name: string;
@@ -14,6 +14,11 @@ export interface FileNode {
 export async function pickFolder(): Promise<string | null> {
   const path = await open({ directory: true, multiple: false });
   return (path as string | null) ?? null;
+}
+
+export async function pickSavePath(defaultPath?: string): Promise<string | null> {
+  const path = await save({ defaultPath });
+  return path ?? null;
 }
 
 /**
@@ -35,6 +40,54 @@ export async function readFile(path: string): Promise<string> {
  */
 export async function writeFile(path: string, content: string): Promise<void> {
   return await invoke("write_file", { path, content });
+}
+
+export async function createFile(
+  rootPath: string,
+  parentPath: string,
+  name: string
+): Promise<FileNode> {
+  return await invoke<FileNode>("create_file", { rootPath, parentPath, name });
+}
+
+export async function createDirectory(
+  rootPath: string,
+  parentPath: string,
+  name: string
+): Promise<FileNode> {
+  return await invoke<FileNode>("create_directory", { rootPath, parentPath, name });
+}
+
+export async function renamePath(
+  rootPath: string,
+  path: string,
+  newName: string
+): Promise<FileNode> {
+  return await invoke<FileNode>("rename_path", { rootPath, path, newName });
+}
+
+export async function deletePath(rootPath: string, path: string): Promise<void> {
+  await invoke("delete_path", { rootPath, path });
+}
+
+export async function copyPath(
+  rootPath: string,
+  path: string,
+  destinationName: string
+): Promise<FileNode> {
+  return await invoke<FileNode>("copy_path", { rootPath, path, destinationName });
+}
+
+export async function revealPath(rootPath: string, path: string): Promise<void> {
+  await invoke("reveal_path", { rootPath, path });
+}
+
+export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
+  return await invoke<string[]>("list_workspace_files", { rootPath });
+}
+
+export async function watchWorkspace(rootPath: string): Promise<void> {
+  await invoke("watch_workspace", { rootPath });
 }
 
 /**
@@ -170,8 +223,16 @@ export async function gitDiffContent(
 /**
  * Stages a file (adds working-tree changes, including new files, to the index).
  */
+export async function gitInit(rootPath: string): Promise<void> {
+  await invoke("git_init", { rootPath });
+}
+
 export async function gitStage(rootPath: string, filePath: string): Promise<void> {
   await invoke("git_stage", { rootPath, filePath });
+}
+
+export async function gitStageAll(rootPath: string): Promise<void> {
+  await invoke("git_stage_all", { rootPath });
 }
 
 /**
@@ -179,6 +240,10 @@ export async function gitStage(rootPath: string, filePath: string): Promise<void
  */
 export async function gitUnstage(rootPath: string, filePath: string): Promise<void> {
   await invoke("git_unstage", { rootPath, filePath });
+}
+
+export async function gitUnstageAll(rootPath: string): Promise<void> {
+  await invoke("git_unstage_all", { rootPath });
 }
 
 /**
@@ -198,6 +263,10 @@ export async function gitBranches(rootPath: string): Promise<GitBranch[]> {
 /**
  * Checks out a branch by name.
  */
+export async function gitCreateBranch(rootPath: string, branchName: string): Promise<void> {
+  await invoke("git_create_branch", { rootPath, branchName });
+}
+
 export async function gitCheckout(rootPath: string, branchName: string): Promise<void> {
   await invoke("git_checkout", { rootPath, branchName });
 }

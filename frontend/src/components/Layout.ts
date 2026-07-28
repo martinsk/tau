@@ -47,6 +47,14 @@ export interface SplitPane {
 export interface LayoutCallbacks {
   onOpenFolder: () => void;
   onFileClick: (path: string, name: string) => void;
+  onCreateFile: (node: FileNode | null) => void;
+  onCreateDirectory: (node: FileNode | null) => void;
+  onRenamePath: (node: FileNode) => void;
+  onDeletePath: (node: FileNode) => void;
+  onDuplicatePath: (node: FileNode) => void;
+  onRefreshExplorer: () => void;
+  onRevealPath: (node: FileNode) => void;
+  onCopyPath: (node: FileNode, relative: boolean) => void;
   onTabClick: (paneId: string, path: string) => void;
   onTabClose: (paneId: string, path: string) => void;
   onTabDrop: (targetPaneId: string, tabJson: string) => void;
@@ -157,8 +165,18 @@ export function createLayout(
   activityBar.appendChild(sourceControlWrapper);
 
   const sidebar = createSidebar(
-    callbacks.onOpenFolder,
-    callbacks.onFileClick,
+    {
+      onOpenFolder: callbacks.onOpenFolder,
+      onFileClick: callbacks.onFileClick,
+      onCreateFile: callbacks.onCreateFile,
+      onCreateDirectory: callbacks.onCreateDirectory,
+      onRename: callbacks.onRenamePath,
+      onDelete: callbacks.onDeletePath,
+      onDuplicate: callbacks.onDuplicatePath,
+      onRefresh: callbacks.onRefreshExplorer,
+      onReveal: callbacks.onRevealPath,
+      onCopyPath: callbacks.onCopyPath,
+    },
     (line, column) => revealPosition(currentActivePaneId, line, column)
   );
   const sourceControl = createSourceControl({

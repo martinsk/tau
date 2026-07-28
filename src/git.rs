@@ -103,7 +103,7 @@ fn compute_status(root_path: &str) -> Result<RepoStatus, String> {
                 ahead: 0,
                 behind: 0,
                 files: Vec::new(),
-            })
+            });
         }
     };
 
@@ -247,8 +247,11 @@ fn diff_content_for_path(
         })
     } else {
         let index_data = blob_content_in_index(&repo, &rel);
-        let original_data = index_data
-            .or_else(|| head_tree.as_ref().and_then(|t| blob_content_at_tree(&repo, t, &rel)));
+        let original_data = index_data.or_else(|| {
+            head_tree
+                .as_ref()
+                .and_then(|t| blob_content_at_tree(&repo, t, &rel))
+        });
         let (original, orig_bin) = bytes_to_string_opt(original_data);
 
         let abs = PathBuf::from(root_path).join(&rel);
@@ -277,9 +280,13 @@ fn stage_path(root_path: &str, file_path: &str) -> Result<(), String> {
     let mut index = repo.index().map_err(|e| e.to_string())?;
     let abs = PathBuf::from(root_path).join(&rel);
     if abs.exists() {
-        index.add_path(std::path::Path::new(&rel)).map_err(|e| e.to_string())?;
+        index
+            .add_path(std::path::Path::new(&rel))
+            .map_err(|e| e.to_string())?;
     } else {
-        index.remove_path(std::path::Path::new(&rel)).map_err(|e| e.to_string())?;
+        index
+            .remove_path(std::path::Path::new(&rel))
+            .map_err(|e| e.to_string())?;
     }
     index.write().map_err(|e| e.to_string())
 }
@@ -300,6 +307,29 @@ fn unstage_path(root_path: &str, file_path: &str) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
             index.write().map_err(|e| e.to_string())?;
         }
+    }
+    Ok(())
+}
+
+fn stage_all(root_path: &str) -> Result<(), String> {
+    let repo = Repository::open(root_path).map_err(|e| e.to_string())?;
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .map_err(|e| e.to_string())?;
+    index.update_all(["*"], None).map_err(|e| e.to_string())?;
+    index.write().map_err(|e| e.to_string())
+}
+
+fn unstage_all(root_path: &str) -> Result<(), String> {
+    let repo = Repository::open(root_path).map_err(|e| e.to_string())?;
+    if let Ok(head) = repo.head().and_then(|value| value.peel_to_commit()) {
+        repo.reset_default(Some(head.as_object()), ["*"])
+            .map_err(|e| e.to_string())?;
+    } else {
+        let mut index = repo.index().map_err(|e| e.to_string())?;
+        index.clear().map_err(|e| e.to_string())?;
+        index.write().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -344,19 +374,33 @@ fn list_branches(root_path: &str) -> Result<Vec<Branch>, String> {
     Ok(branches)
 }
 
+fn create_branch(root_path: &str, branch_name: &str) -> Result<(), String> {
+    if branch_name.trim().is_empty() {
+        return Err("branch name is required".into());
+    }
+    let repo = Repository::open(root_path).map_err(|e| e.to_string())?;
+    let commit = repo
+        .head()
+        .and_then(|head| head.peel_to_commit())
+        .map_err(|e| e.to_string())?;
+    repo.branch(branch_name, &commit, false)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn checkout_branch(root_path: &str, branch_name: &str) -> Result<(), String> {
     let repo = Repository::open(root_path).map_err(|e| e.to_string())?;
-    let (object, reference) = repo
-        .revparse_ext(branch_name)
+    let (object, reference) = repo.revparse_ext(branch_name).map_err(|e| e.to_string())?;
+    repo.checkout_tree(&object, None)
         .map_err(|e| e.to_string())?;
-    repo.checkout_tree(&object, None).map_err(|e| e.to_string())?;
     match reference {
         Some(r) => {
             let name = r.name().ok_or("invalid reference name")?;
             repo.set_head(name).map_err(|e| e.to_string())?;
         }
         None => {
-            repo.set_head_detached(object.id()).map_err(|e| e.to_string())?;
+            repo.set_head_detached(object.id())
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -407,7 +451,10 @@ impl GitManager {
         })
         .map_err(|e| e.to_string())?;
         watcher
-            .watch(std::path::Path::new(&root_path), notify::RecursiveMode::Recursive)
+            .watch(
+                std::path::Path::new(&root_path),
+                notify::RecursiveMode::Recursive,
+            )
             .map_err(|e| e.to_string())?;
 
         let root_for_thread = root_path.clone();
@@ -438,10 +485,7 @@ impl GitManager {
             .unwrap()
             .insert(root_path.clone(), RepoWatcher { _watcher: watcher });
 
-        let _ = app.emit(
-            "git-status-changed",
-            GitStatusChanged { root_path },
-        );
+        let _ = app.emit("git-status-changed", GitStatusChanged { root_path });
         Ok(())
     }
 }
@@ -470,13 +514,30 @@ pub fn git_diff_content(
 }
 
 #[tauri::command]
+pub fn git_init(root_path: String) -> Result<(), String> {
+    Repository::init(root_path)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn git_stage(root_path: String, file_path: String) -> Result<(), String> {
     stage_path(&root_path, &file_path)
 }
 
 #[tauri::command]
+pub fn git_stage_all(root_path: String) -> Result<(), String> {
+    stage_all(&root_path)
+}
+
+#[tauri::command]
 pub fn git_unstage(root_path: String, file_path: String) -> Result<(), String> {
     unstage_path(&root_path, &file_path)
+}
+
+#[tauri::command]
+pub fn git_unstage_all(root_path: String) -> Result<(), String> {
+    unstage_all(&root_path)
 }
 
 #[tauri::command]
@@ -487,6 +548,11 @@ pub fn git_commit(root_path: String, message: String) -> Result<(), String> {
 #[tauri::command]
 pub fn git_branches(root_path: String) -> Result<Vec<Branch>, String> {
     list_branches(&root_path)
+}
+
+#[tauri::command]
+pub fn git_create_branch(root_path: String, branch_name: String) -> Result<(), String> {
+    create_branch(&root_path, &branch_name)
 }
 
 #[tauri::command]
@@ -599,6 +665,35 @@ mod tests {
         let status = compute_status(&root).unwrap();
         assert_eq!(status.files[0].staged, None);
         assert_eq!(status.files[0].unstaged, Some(FileStatusKind::Untracked));
+    }
+
+    #[test]
+    fn stage_and_unstage_all_roundtrip() {
+        let dir = init_repo();
+        let root = dir.path().to_str().unwrap().to_string();
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        fs::write(dir.path().join("b.txt"), "b").unwrap();
+        stage_all(&root).unwrap();
+        let staged = compute_status(&root).unwrap();
+        assert!(staged.files.iter().all(|file| file.staged.is_some()));
+        unstage_all(&root).unwrap();
+        let unstaged = compute_status(&root).unwrap();
+        assert!(unstaged.files.iter().all(|file| file.staged.is_none()));
+    }
+
+    #[test]
+    fn creates_and_checks_out_branch() {
+        let dir = init_repo();
+        let root = dir.path().to_str().unwrap().to_string();
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        stage_all(&root).unwrap();
+        commit_changes(&root, "initial").unwrap();
+        create_branch(&root, "feature").unwrap();
+        checkout_branch(&root, "feature").unwrap();
+        assert_eq!(
+            compute_status(&root).unwrap().branch.as_deref(),
+            Some("feature")
+        );
     }
 
     #[test]

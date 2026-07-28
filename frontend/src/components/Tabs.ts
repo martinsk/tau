@@ -9,6 +9,7 @@ export interface TabInfo {
   name: string;
   content: string;
   dirty: boolean;
+  untitled?: boolean;
   diff?: TabDiffInfo;
 }
 

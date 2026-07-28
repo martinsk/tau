@@ -1,15 +1,30 @@
 import {
   pickFolder,
+  pickSavePath,
   readDir,
   readFile,
   writeFile,
+  createFile,
+  createDirectory,
+  renamePath,
+  deletePath,
+  copyPath,
+  revealPath,
+  listWorkspaceFiles,
+  watchWorkspace,
   terminalInput,
   gitWatchRepo,
   gitStatus as fetchGitStatus,
+  gitInit,
   gitStage,
+  gitStageAll,
   gitUnstage,
+  gitUnstageAll,
   gitCommit,
   gitDiffContent,
+  gitBranches,
+  gitCreateBranch,
+  gitCheckout,
   type FileNode,
   type RepoStatus,
 } from "./api.js";
@@ -68,9 +83,15 @@ import {
 } from "./tasks.js";
 import type { Diagnostic, LspManager } from "./lsp.js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { registerCommands, runCommand } from "./commands.js";
+import {
+  registerCommands,
+  runCommand,
+  setCommandErrorHandler,
+} from "./commands.js";
 import { chordFromEvent, findBinding, type KeybindingMode } from "./keymaps.js";
 import { createCommandPalette } from "./components/CommandPalette.js";
+import { chooseDialog, inputDialog } from "./components/Dialogs.js";
+import { pickItem } from "./components/Picker.js";
 
 interface AppState {
   rootPath: string | null;
@@ -110,6 +131,7 @@ const recentFolderStore: RecentFolderStore = createLocalRecentFolderStore();
 const agentConfigStore = createLocalAgentConfigStore();
 let paneCounter = 1;
 let terminalCounter = 0;
+let untitledCounter = 0;
 
 function newPaneId(): string {
   paneCounter += 1;
@@ -123,10 +145,12 @@ function newTerminalId(): string {
 
 function stripDiffTabs(node: PaneNode): PaneNode {
   if (node.type === "editor") {
-    const tabs = node.tabs.filter((t) => !t.diff);
+    const tabs = node.tabs.filter((t) => !t.diff && !t.untitled);
     if (tabs.length === 0) return emptyEditorPane(node.id);
     const activeTab =
-      node.activeTab && !node.activeTab.diff ? node.activeTab : tabs[tabs.length - 1];
+      node.activeTab && !node.activeTab.diff && !node.activeTab.untitled
+        ? node.activeTab
+        : tabs[tabs.length - 1];
     return {
       type: "editor",
       id: node.id,
@@ -276,6 +300,74 @@ function scheduleOutlineRefresh() {
   }, 400);
 }
 
+function dirtyTabs(): TabInfo[] {
+  const seen = new Set<TabInfo>();
+  const tabs: TabInfo[] = [];
+  for (const pane of collectEditorPanes(state.editorRoot)) {
+    for (const tab of pane.tabs) {
+      if (tab.dirty && !seen.has(tab)) {
+        seen.add(tab);
+        tabs.push(tab);
+      }
+    }
+  }
+  return tabs;
+}
+
+async function saveTab(tab: TabInfo, forceSaveAs = false): Promise<boolean> {
+  if (tab.diff && !tab.diff.editable) return false;
+  try {
+    if (tab.untitled || forceSaveAs) {
+      const defaultPath = state.rootPath ? `${state.rootPath}/${tab.name}` : tab.name;
+      const path = await pickSavePath(defaultPath);
+      if (!path) return false;
+      const conflict = collectEditorPanes(state.editorRoot).some((pane) =>
+        pane.tabs.some((candidate) => candidate !== tab && candidate.path === path)
+      );
+      if (conflict) {
+        alert("That file is already open.");
+        return false;
+      }
+      tab.path = path;
+      tab.name = path.split("/").pop() ?? tab.name;
+      tab.untitled = false;
+      await writeFile(path, tab.content);
+      await lspManager?.openDocument(path, languageForFile(tab.name), tab.content);
+    } else {
+      await writeFile(tab.path, tab.content);
+      await lspManager?.saveDocument(tab.path);
+    }
+    tab.dirty = false;
+    return true;
+  } catch (err) {
+    console.error("Failed to save file:", err);
+    alert(`Failed to save file: ${err}`);
+    return false;
+  }
+}
+
+async function confirmDiscardDirtyTabs(tabs: TabInfo[]): Promise<boolean> {
+  if (tabs.length === 0) return true;
+  const choice = await chooseDialog(
+    tabs.length === 1 ? `Save changes to ${tabs[0].name}?` : `Save changes to ${tabs.length} files?`,
+    "Your changes will be lost if you don't save them.",
+    [
+      { label: "Cancel", value: "cancel" as const },
+      { label: "Don't Save", value: "discard" as const, danger: true },
+      { label: tabs.length === 1 ? "Save" : "Save All", value: "save" as const, primary: true },
+    ],
+    "cancel" as const
+  );
+  if (choice === "cancel") return false;
+  if (choice === "discard") return true;
+  for (const tab of tabs) {
+    if (!(await saveTab(tab))) return false;
+  }
+  updateLayout();
+  await refreshGitStatus();
+  return true;
+}
+
 async function handleOpenFolder() {
   let path: string | null = null;
   try {
@@ -285,7 +377,8 @@ async function handleOpenFolder() {
     alert(`Failed to open folder dialog: ${err}`);
     return;
   }
-  if (!path) return;
+  if (!path || path === state.rootPath) return;
+  if (!(await confirmDiscardDirtyTabs(dirtyTabs()))) return;
   await openFolder(path);
 }
 
@@ -360,6 +453,9 @@ async function openFolder(path: string) {
     }
   }
 
+  watchWorkspace(path).catch((err) => {
+    console.error("Failed to watch workspace:", err);
+  });
   gitWatchRepo(path).catch((err) => {
     console.error("Failed to watch git repository:", err);
   });
@@ -369,6 +465,227 @@ async function openFolder(path: string) {
   layout?.setAgentWidth(state.agentWidth);
   layout?.setAgentVisible(state.agentVisible);
   await layout?.updateAgent(state.rootPath, state.agentConfig, state.agentSessionId);
+}
+
+async function handleOpenRecent() {
+  const folders = recentFolderStore.getRecentFolders();
+  const path = await pickItem(
+    "Open Recent Folder",
+    folders.map((folder) => ({
+      label: folder.split("/").pop() ?? folder,
+      description: folder,
+      value: folder,
+    })),
+    "Search recent folders…"
+  );
+  if (!path || path === state.rootPath) return;
+  if (!(await confirmDiscardDirtyTabs(dirtyTabs()))) return;
+  await openFolder(path);
+}
+
+async function handleQuickOpen() {
+  if (!state.rootPath) return;
+  try {
+    const files = await listWorkspaceFiles(state.rootPath);
+    const relative = await pickItem(
+      "Quick Open",
+      files.map((path) => ({
+        label: path.split("/").pop() ?? path,
+        description: path,
+        value: path,
+      })),
+      "Search files by name…"
+    );
+    if (!relative) return;
+    const path = `${state.rootPath}/${relative}`;
+    await handleFileClick(path, relative.split("/").pop() ?? relative);
+  } catch (err) {
+    alert(`Failed to list workspace files: ${err}`);
+  }
+}
+
+async function refreshExplorer() {
+  if (!state.rootPath) {
+    layout?.updateTree([]);
+    return;
+  }
+  try {
+    layout?.updateTree(await readDir(state.rootPath));
+  } catch (err) {
+    console.error("Failed to refresh Explorer:", err);
+    alert(`Failed to refresh Explorer: ${err}`);
+  }
+}
+
+function explorerParent(node: FileNode | null): string | null {
+  if (!state.rootPath) return null;
+  if (!node) return state.rootPath;
+  if (node.is_dir) return node.path;
+  const separator = node.path.lastIndexOf("/");
+  return separator > 0 ? node.path.slice(0, separator) : state.rootPath;
+}
+
+function handleNewUntitledFile() {
+  untitledCounter += 1;
+  const pane = getActivePane();
+  const name = `Untitled-${untitledCounter}`;
+  const tab: TabInfo = {
+    path: `untitled://${untitledCounter}`,
+    name,
+    content: "",
+    dirty: true,
+    untitled: true,
+  };
+  state.editorRoot = replacePane(state.editorRoot, pane.id, addTab(pane, tab));
+  updateLayout();
+}
+
+async function handleCreateFile(node: FileNode | null) {
+  if (!state.rootPath) return;
+  const parent = explorerParent(node);
+  if (!parent) return;
+  const name = await inputDialog("New File", {
+    message: `Create in ${parent}`,
+    placeholder: "filename",
+    confirmLabel: "Create",
+  });
+  if (!name) return;
+  try {
+    const created = await createFile(state.rootPath, parent, name);
+    await refreshExplorer();
+    await handleFileClick(created.path, created.name);
+  } catch (err) {
+    alert(`Failed to create file: ${err}`);
+  }
+}
+
+async function handleCreateDirectory(node: FileNode | null) {
+  if (!state.rootPath) return;
+  const parent = explorerParent(node);
+  if (!parent) return;
+  const name = await inputDialog("New Folder", {
+    message: `Create in ${parent}`,
+    placeholder: "folder name",
+    confirmLabel: "Create",
+  });
+  if (!name) return;
+  try {
+    await createDirectory(state.rootPath, parent, name);
+    await refreshExplorer();
+  } catch (err) {
+    alert(`Failed to create folder: ${err}`);
+  }
+}
+
+function pathMatches(path: string, target: string, directory: boolean): boolean {
+  return path === target || (directory && path.startsWith(`${target}/`));
+}
+
+function tabsForPath(node: FileNode): TabInfo[] {
+  return collectEditorPanes(state.editorRoot).flatMap((pane) =>
+    pane.tabs.filter((tab) => pathMatches(tab.path, node.path, node.is_dir))
+  );
+}
+
+async function handleRenamePath(node: FileNode) {
+  if (!state.rootPath) return;
+  const newName = await inputDialog("Rename", {
+    value: node.name,
+    confirmLabel: "Rename",
+  });
+  if (!newName || newName === node.name) return;
+  try {
+    const renamed = await renamePath(state.rootPath, node.path, newName);
+    for (const pane of collectEditorPanes(state.editorRoot)) {
+      for (const tab of pane.tabs) {
+        if (!pathMatches(tab.path, node.path, node.is_dir)) continue;
+        const oldPath = tab.path;
+        const suffix = oldPath.slice(node.path.length);
+        tab.path = `${renamed.path}${suffix}`;
+        tab.name = tab.path.split("/").pop() ?? tab.name;
+        if (!tab.diff && !tab.untitled) {
+          await lspManager?.closeDocument(oldPath);
+          await lspManager?.openDocument(tab.path, languageForFile(tab.name), tab.content);
+        }
+      }
+    }
+    await refreshExplorer();
+    updateLayout();
+    await refreshGitStatus();
+  } catch (err) {
+    alert(`Failed to rename: ${err}`);
+  }
+}
+
+async function handleDeletePath(node: FileNode) {
+  if (!state.rootPath) return;
+  const affectedTabs = tabsForPath(node);
+  if (!(await confirmDiscardDirtyTabs(affectedTabs.filter((tab) => tab.dirty)))) return;
+  const confirmed = await chooseDialog(
+    `Delete ${node.name}?`,
+    node.is_dir ? "This folder and all of its contents will be permanently deleted." : "This file will be permanently deleted.",
+    [
+      { label: "Cancel", value: false },
+      { label: "Delete", value: true, danger: true },
+    ],
+    false
+  );
+  if (!confirmed) return;
+  try {
+    await deletePath(state.rootPath, node.path);
+    for (const pane of [...collectEditorPanes(state.editorRoot)]) {
+      for (const tab of [...pane.tabs]) {
+        if (!pathMatches(tab.path, node.path, node.is_dir)) continue;
+        if (!tab.diff && !tab.untitled) await lspManager?.closeDocument(tab.path);
+        const result = closeTab(state.editorRoot, pane.id, tab.path, state.activePaneId);
+        state.editorRoot = result.root;
+        state.activePaneId = result.activePaneId;
+      }
+    }
+    await refreshExplorer();
+    updateLayout();
+    await refreshGitStatus();
+  } catch (err) {
+    alert(`Failed to delete: ${err}`);
+  }
+}
+
+function duplicateName(name: string, isDirectory: boolean): string {
+  if (isDirectory) return `${name} copy`;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? `${name.slice(0, dot)} copy${name.slice(dot)}` : `${name} copy`;
+}
+
+async function handleDuplicatePath(node: FileNode) {
+  if (!state.rootPath) return;
+  const destinationName = await inputDialog("Duplicate", {
+    value: duplicateName(node.name, node.is_dir),
+    confirmLabel: "Duplicate",
+  });
+  if (!destinationName) return;
+  try {
+    await copyPath(state.rootPath, node.path, destinationName);
+    await refreshExplorer();
+    await refreshGitStatus();
+  } catch (err) {
+    alert(`Failed to duplicate: ${err}`);
+  }
+}
+
+async function handleCopyPath(node: FileNode, relative: boolean) {
+  const value = relative && state.rootPath
+    ? node.path.replace(`${state.rootPath}/`, "")
+    : node.path;
+  await navigator.clipboard.writeText(value);
+}
+
+async function handleRevealPath(node: FileNode) {
+  if (!state.rootPath) return;
+  try {
+    await revealPath(state.rootPath, node.path);
+  } catch (err) {
+    alert(`Failed to reveal path: ${err}`);
+  }
 }
 
 async function refreshGitStatus() {
@@ -572,7 +889,18 @@ function handleTabClick(paneId: string, path: string) {
   updateLayout();
 }
 
-function handleTabClose(paneId: string, path: string) {
+async function handleTabClose(paneId: string, path: string) {
+  const pane = findPane(state.editorRoot, paneId);
+  const tab = pane?.tabs.find((candidate) => candidate.path === path);
+  if (tab?.dirty && !(await confirmDiscardDirtyTabs([tab]))) return;
+  if (tab && !tab.diff && !tab.untitled) {
+    const openElsewhere = collectEditorPanes(state.editorRoot).some((candidatePane) =>
+      candidatePane.tabs.some(
+        (candidate) => candidate !== tab && !candidate.diff && candidate.path === tab.path
+      )
+    );
+    if (!openElsewhere) await lspManager?.closeDocument(tab.path);
+  }
   const result = closeTab(state.editorRoot, paneId, path, state.activePaneId);
   state.editorRoot = result.root;
   state.activePaneId = result.activePaneId;
@@ -640,28 +968,40 @@ function handleSplitDrop(
   updateLayout();
 }
 
-async function handleSave(paneId: string) {
+async function handleSaveAs(paneId: string): Promise<boolean> {
   const pane = findPane(state.editorRoot, paneId);
-  if (!pane || !layout) return;
-  const tab = pane.activeTab;
-  if (!tab) return;
-  if (tab.diff && !tab.diff.editable) return;
-  try {
-    const content = layout.getPaneContent(paneId);
-    await writeFile(tab.path, content);
-    await lspManager?.saveDocument(tab.path);
-    tab.content = content;
-    tab.dirty = false;
-    layout.updatePaneTabs(paneId);
-    saveLayout();
-    refreshGitStatus();
-    if (paneId === state.activePaneId) {
-      refreshOutline();
-    }
-  } catch (err) {
-    console.error("Failed to save file:", err);
-    alert(`Failed to save file: ${err}`);
+  if (!pane || !layout || !pane.activeTab) return false;
+  pane.activeTab.content = layout.getPaneContent(paneId);
+  if (!(await saveTab(pane.activeTab, true))) return false;
+  updateLayout();
+  await refreshExplorer();
+  await refreshGitStatus();
+  return true;
+}
+
+async function handleSaveAll(): Promise<void> {
+  for (const tab of dirtyTabs()) {
+    if (!(await saveTab(tab))) return;
   }
+  updateLayout();
+  await refreshExplorer();
+  await refreshGitStatus();
+}
+
+async function handleSave(paneId: string): Promise<boolean> {
+  const pane = findPane(state.editorRoot, paneId);
+  if (!pane || !layout) return false;
+  const tab = pane.activeTab;
+  if (!tab) return false;
+  tab.content = layout.getPaneContent(paneId);
+  if (!(await saveTab(tab))) return false;
+  layout.updatePaneTabs(paneId);
+  saveLayout();
+  await refreshGitStatus();
+  if (paneId === state.activePaneId) {
+    refreshOutline();
+  }
+  return true;
 }
 
 function handleContentChange(paneId: string, content: string) {
@@ -722,18 +1062,94 @@ function addTaskTerminal(name: string, cwd: string): string {
   return id;
 }
 
+async function executeTask(task: Awaited<ReturnType<typeof loadTasks>>[number]) {
+  if (!state.rootPath) return;
+  const configuredCwd = task.options?.cwd;
+  const cwd = configuredCwd
+    ? configuredCwd.startsWith("/")
+      ? configuredCwd
+      : `${state.rootPath}/${configuredCwd}`
+    : state.rootPath;
+  const id = addTaskTerminal(task.label, cwd);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await terminalInput(id, taskCommand(task) + "\n");
+}
+
 async function runTask(label: string) {
   if (!state.rootPath) return;
   const tasks = await loadTasks(state.rootPath);
-  const task = findTaskByLabel(tasks, label) ?? findDefaultTask(tasks, "build");
+  const group = label === "test" ? "test" : "build";
+  const task = findTaskByLabel(tasks, label) ?? findDefaultTask(tasks, group);
   if (!task) {
     console.warn(`Task "${label}" not found`);
     return;
   }
-  const id = addTaskTerminal(task.label, task.options?.cwd ?? state.rootPath);
-  // Wait a tick so the shell prompt is ready.
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  await terminalInput(id, taskCommand(task) + "\n");
+  await executeTask(task);
+}
+
+async function handleRunTask() {
+  if (!state.rootPath) return;
+  const tasks = await loadTasks(state.rootPath);
+  const task = await pickItem(
+    "Run Task",
+    tasks.map((candidate) => ({
+      label: candidate.label,
+      description: taskCommand(candidate),
+      value: candidate,
+    })),
+    "Search configured tasks…"
+  );
+  if (task) await executeTask(task);
+}
+
+async function handleInitRepository() {
+  if (!state.rootPath) return;
+  await gitInit(state.rootPath);
+  await gitWatchRepo(state.rootPath);
+  await refreshGitStatus();
+}
+
+async function handleStageAll() {
+  if (!state.rootPath) return;
+  await gitStageAll(state.rootPath);
+  await refreshGitStatus();
+}
+
+async function handleUnstageAll() {
+  if (!state.rootPath) return;
+  await gitUnstageAll(state.rootPath);
+  await refreshGitStatus();
+}
+
+async function handleCreateBranch() {
+  if (!state.rootPath) return;
+  const name = await inputDialog("Create Branch", {
+    placeholder: "branch-name",
+    confirmLabel: "Create",
+  });
+  if (!name) return;
+  await gitCreateBranch(state.rootPath, name);
+  await gitCheckout(state.rootPath, name);
+  await refreshGitStatus();
+}
+
+async function handleCheckoutBranch() {
+  if (!state.rootPath) return;
+  if (!(await confirmDiscardDirtyTabs(dirtyTabs()))) return;
+  const branches = await gitBranches(state.rootPath);
+  const branch = await pickItem(
+    "Checkout Branch",
+    branches.map((candidate) => ({
+      label: candidate.name,
+      description: candidate.is_head ? "Current branch" : candidate.is_remote ? "Remote" : "Local",
+      value: candidate.name,
+    })),
+    "Search branches…"
+  );
+  if (!branch) return;
+  await gitCheckout(state.rootPath, branch);
+  await refreshExplorer();
+  await refreshGitStatus();
 }
 
 function handleAgentStart(config: HarnessConfig) {
@@ -912,13 +1328,66 @@ function registerAppCommands() {
       run: () => handleOpenFolder(),
     },
     {
+      id: "file.openRecent",
+      title: "File: Open Recent Folder…",
+      enabled: () => recentFolderStore.getRecentFolders().length > 0,
+      run: () => handleOpenRecent(),
+    },
+    {
+      id: "file.quickOpen",
+      title: "File: Quick Open…",
+      enabled: () => Boolean(state.rootPath),
+      run: () => handleQuickOpen(),
+    },
+    {
+      id: "file.new",
+      title: "File: New Untitled File",
+      run: () => handleNewUntitledFile(),
+    },
+    {
+      id: "explorer.newFile",
+      title: "Explorer: New File",
+      enabled: () => Boolean(state.rootPath),
+      run: () => handleCreateFile(null),
+    },
+    {
+      id: "file.newFolder",
+      title: "File: New Folder",
+      enabled: () => Boolean(state.rootPath),
+      run: () => handleCreateDirectory(null),
+    },
+    {
+      id: "explorer.refresh",
+      title: "Explorer: Refresh",
+      enabled: () => Boolean(state.rootPath),
+      run: () => refreshExplorer(),
+    },
+    {
       id: "file.save",
       title: "File: Save",
-      run: () => handleSave(state.activePaneId),
+      enabled: () => Boolean(findPane(state.editorRoot, state.activePaneId)?.activeTab),
+      run: async () => {
+        await handleSave(state.activePaneId);
+      },
+    },
+    {
+      id: "file.saveAs",
+      title: "File: Save As…",
+      enabled: () => Boolean(findPane(state.editorRoot, state.activePaneId)?.activeTab),
+      run: async () => {
+        await handleSaveAs(state.activePaneId);
+      },
+    },
+    {
+      id: "file.saveAll",
+      title: "File: Save All",
+      enabled: () => dirtyTabs().length > 0,
+      run: () => handleSaveAll(),
     },
     {
       id: "tab.close",
       title: "File: Close Tab",
+      enabled: () => Boolean(findPane(state.editorRoot, state.activePaneId)?.activeTab),
       run: () => handleCloseActiveTab(),
     },
     {
@@ -950,6 +1419,48 @@ function registerAppCommands() {
       id: "agent.toggle",
       title: "Agent: Toggle Panel",
       run: () => handleToggleAgent(),
+    },
+    {
+      id: "task.run",
+      title: "Task: Run Task…",
+      enabled: () => Boolean(state.rootPath),
+      run: () => handleRunTask(),
+    },
+    {
+      id: "git.init",
+      title: "Git: Initialize Repository",
+      enabled: () => Boolean(state.rootPath && !state.gitStatus?.is_repo),
+      run: () => handleInitRepository(),
+    },
+    {
+      id: "git.refresh",
+      title: "Git: Refresh",
+      enabled: () => Boolean(state.rootPath),
+      run: () => refreshGitStatus(),
+    },
+    {
+      id: "git.stageAll",
+      title: "Git: Stage All Changes",
+      enabled: () => Boolean(state.gitStatus?.files.some((file) => file.unstaged)),
+      run: () => handleStageAll(),
+    },
+    {
+      id: "git.unstageAll",
+      title: "Git: Unstage All Changes",
+      enabled: () => Boolean(state.gitStatus?.files.some((file) => file.staged)),
+      run: () => handleUnstageAll(),
+    },
+    {
+      id: "git.createBranch",
+      title: "Git: Create Branch…",
+      enabled: () => Boolean(state.gitStatus?.is_repo && state.gitStatus.branch),
+      run: () => handleCreateBranch(),
+    },
+    {
+      id: "git.checkoutBranch",
+      title: "Git: Checkout Branch…",
+      enabled: () => Boolean(state.gitStatus?.is_repo),
+      run: () => handleCheckoutBranch(),
     },
     {
       id: "task.runBuild",
@@ -1019,6 +1530,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     {
       onOpenFolder: handleOpenFolder,
       onFileClick: handleFileClick,
+      onCreateFile: handleCreateFile,
+      onCreateDirectory: handleCreateDirectory,
+      onRenamePath: handleRenamePath,
+      onDeletePath: handleDeletePath,
+      onDuplicatePath: handleDuplicatePath,
+      onRefreshExplorer: refreshExplorer,
+      onRevealPath: handleRevealPath,
+      onCopyPath: handleCopyPath,
       onTabClick: handleTabClick,
       onTabClose: handleTabClose,
       onTabDrop: handleTabDrop,
@@ -1063,9 +1582,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   app.appendChild(layout.element);
 
+  setCommandErrorHandler((command, error) => {
+    console.error(`Command "${command.id}" failed:`, error);
+    alert(`Command failed: ${command.title}\n${String(error)}`);
+  });
   registerAppCommands();
   commandPalette = createCommandPalette(() => state.keybindingMode);
   document.body.appendChild(commandPalette.element);
+
+  window.addEventListener("beforeunload", (event) => {
+    if (dirtyTabs().length === 0) return;
+    event.preventDefault();
+  });
 
   window.addEventListener(
     "keydown",
@@ -1085,6 +1613,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   );
 
   try {
+    let closeApproved = false;
+    const currentWindow = getCurrentWindow();
+    await currentWindow.onCloseRequested(async (event) => {
+      if (closeApproved) return;
+      event.preventDefault();
+      if (!(await confirmDiscardDirtyTabs(dirtyTabs()))) return;
+      closeApproved = true;
+      await currentWindow.close();
+    });
     await listen("menu-open-folder", () => runCommand("file.openFolder"));
     await listen("menu-save", () => runCommand("file.save"));
     await listen("menu-close-tab", () => runCommand("tab.close"));
@@ -1096,6 +1633,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     await listen("menu-kill-terminal", () => runCommand("terminal.kill"));
     await listen("menu-run-build-task", () => runCommand("task.runBuild"));
     await listen("menu-run-test-task", () => runCommand("task.runTest"));
+    await listen<{ root_path: string }>("workspace-changed", (event) => {
+      if (event.payload.root_path === state.rootPath) {
+        refreshExplorer();
+      }
+    });
     await listen<{ root_path: string }>("git-status-changed", (event) => {
       if (event.payload.root_path === state.rootPath) {
         refreshGitStatus();

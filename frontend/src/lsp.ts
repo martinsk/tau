@@ -531,6 +531,19 @@ export class LspManager {
     });
   }
 
+  async closeDocument(path: string): Promise<void> {
+    const opening = this.openingDocuments.get(path);
+    if (opening) await opening;
+    const document = this.documents.get(path);
+    if (!document) return;
+    this.clients.get(document.languageId)?.notify("textDocument/didClose", {
+      textDocument: { uri: `file://${path}` },
+    });
+    this.documents.delete(path);
+    this.diagnosticsByPath.delete(path);
+    this.notifyDiagnosticsListeners();
+  }
+
   stop(): void {
     this.stopped = true;
     for (const client of this.clients.values()) {

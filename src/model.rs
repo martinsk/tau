@@ -2,16 +2,24 @@ use std::collections::HashMap;
 
 pub type Metadata = HashMap<String, String>;
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize,
+)]
 pub struct ProjectId(pub u64);
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize,
+)]
 pub struct ContainerId(pub u64);
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize,
+)]
 pub struct ItemId(pub u64);
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize,
+)]
 pub struct ReferenceId(pub u64);
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]

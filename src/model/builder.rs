@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
+use crate::model::validate::{ValidationError, validate};
 use crate::model::{Container, ContainerId, Item, Metadata, Project, ProjectId, Reference};
-use crate::model::validate::{validate, ValidationError};
 
 /// Marker type for a [`ProjectBuilder`] that is still being edited.
 #[derive(Debug, Clone, Copy)]
@@ -10,7 +10,6 @@ pub struct Draft;
 /// Marker type for a [`ProjectBuilder`] that has passed validation.
 #[derive(Debug, Clone, Copy)]
 pub struct Validated;
-
 
 /// A typestate builder for constructing a [`Project`] while preserving core
 /// invariants: containers and items referenced by a parent must exist, and
@@ -91,10 +90,7 @@ impl ProjectBuilder<Draft> {
     ///
     /// Returns an error if either the source or target item does not exist, or
     /// if the reference id has already been used.
-    pub fn add_reference(
-        &mut self,
-        reference: Reference,
-    ) -> Result<&mut Self, ValidationError> {
+    pub fn add_reference(&mut self, reference: Reference) -> Result<&mut Self, ValidationError> {
         if self.project.references.contains_key(&reference.id) {
             return Err(ValidationError::DuplicateReference { id: reference.id });
         }
@@ -220,7 +216,9 @@ mod tests {
     #[test]
     fn builder_rejects_reference_to_missing_item() {
         let mut builder = ProjectBuilder::new(ProjectId(1), "test", ContainerId(10));
-        builder.add_item(item(ItemId(30), "a"), ContainerId(10)).unwrap();
+        builder
+            .add_item(item(ItemId(30), "a"), ContainerId(10))
+            .unwrap();
         let err = builder
             .add_reference(Reference {
                 id: ReferenceId(1),
@@ -230,12 +228,7 @@ mod tests {
                 anchor: None,
             })
             .unwrap_err();
-        assert_eq!(
-            err,
-            ValidationError::MissingItem {
-                id: ItemId(99)
-            }
-        );
+        assert_eq!(err, ValidationError::MissingItem { id: ItemId(99) });
     }
 
     #[test]
@@ -257,7 +250,9 @@ mod tests {
         let errors = builder.build().unwrap_err();
         assert!(errors.iter().any(|e| matches!(
             e,
-            ValidationError::OrphanContainer { id: ContainerId(20) }
+            ValidationError::OrphanContainer {
+                id: ContainerId(20)
+            }
         )));
     }
 }

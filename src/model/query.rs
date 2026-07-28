@@ -20,7 +20,6 @@ pub fn references_from(project: &Project, id: ItemId) -> Vec<&Reference> {
         .collect()
 }
 
-
 pub fn references_to(project: &Project, id: ItemId) -> Vec<&Reference> {
     project
         .references
@@ -160,8 +159,14 @@ mod tests {
     #[test]
     fn parent_of_container_finds_parent() {
         let project = sample_project();
-        assert_eq!(parent_of_container(&project, ContainerId(20)), Some(ContainerId(10)));
-        assert_eq!(parent_of_container(&project, ContainerId(30)), Some(ContainerId(20)));
+        assert_eq!(
+            parent_of_container(&project, ContainerId(20)),
+            Some(ContainerId(10))
+        );
+        assert_eq!(
+            parent_of_container(&project, ContainerId(30)),
+            Some(ContainerId(20))
+        );
     }
 
     #[test]
@@ -180,6 +185,9 @@ mod tests {
     fn walk_containers_in_expected_order() {
         let project = sample_project();
         let walked = walk_containers(&project);
-        assert_eq!(walked, vec![ContainerId(10), ContainerId(20), ContainerId(30)]);
+        assert_eq!(
+            walked,
+            vec![ContainerId(10), ContainerId(20), ContainerId(30)]
+        );
     }
 }

@@ -10,6 +10,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(pty::PtyManager::default())
         .manage(git::GitManager::default())
+        .manage(commands::WorkspaceManager::default())
         .setup(|app| {
             let menu = menu::build_menu(&app.handle())?;
             app.set_menu(menu)?;
@@ -23,6 +24,14 @@ pub fn run() {
             commands::read_dir,
             commands::read_file,
             commands::write_file,
+            commands::create_file,
+            commands::create_directory,
+            commands::rename_path,
+            commands::delete_path,
+            commands::copy_path,
+            commands::reveal_path,
+            commands::list_workspace_files,
+            commands::watch_workspace,
             pty::create_terminal,
             pty::terminal_input,
             pty::terminal_resize,
@@ -34,10 +43,14 @@ pub fn run() {
             git::git_watch_repo,
             git::git_status,
             git::git_diff_content,
+            git::git_init,
             git::git_stage,
+            git::git_stage_all,
             git::git_unstage,
+            git::git_unstage_all,
             git::git_commit,
             git::git_branches,
+            git::git_create_branch,
             git::git_checkout,
         ])
         .run(tauri::generate_context!())
@@ -83,7 +96,11 @@ mod tests {
             .as_array()
             .expect("shell:allow-spawn must have an `allow` scope array")
             .iter()
-            .map(|entry| entry["name"].as_str().expect("scope entry must have a `name`"))
+            .map(|entry| {
+                entry["name"]
+                    .as_str()
+                    .expect("scope entry must have a `name`")
+            })
             .collect();
 
         for server in ["rust-analyzer", "clangd"] {

@@ -2,12 +2,26 @@ import { readDir, type FileNode, type RepoStatus, type FileStatusKind } from "..
 import { setDrag, clearDrag } from "../dragState.js";
 import { getFileIcon } from "../fileIcons.js";
 import type { OutlineNode } from "../lsp.js";
+import { showContextMenu } from "./ContextMenu.js";
 
 export interface SidebarAPI {
   element: HTMLElement;
   updateTree: (nodes: FileNode[]) => void;
   updateGitStatus: (status: RepoStatus | null) => void;
   updateOutline: (nodes: OutlineNode[], available: boolean) => void;
+}
+
+export interface ExplorerCallbacks {
+  onOpenFolder: () => void;
+  onFileClick: (path: string, name: string) => void;
+  onCreateFile: (node: FileNode | null) => void;
+  onCreateDirectory: (node: FileNode | null) => void;
+  onRename: (node: FileNode) => void;
+  onDelete: (node: FileNode) => void;
+  onDuplicate: (node: FileNode) => void;
+  onRefresh: () => void;
+  onReveal: (node: FileNode) => void;
+  onCopyPath: (node: FileNode, relative: boolean) => void;
 }
 
 // Subset of the LSP `SymbolKind` enum, abbreviated for a compact sidebar row.
@@ -68,8 +82,7 @@ function badgeInfo(
  * Directories are expanded lazily when clicked.
  */
 export function createSidebar(
-  onOpenFolder: () => void,
-  onFileClick: (path: string, name: string) => void,
+  callbacks: ExplorerCallbacks,
   onOutlineSymbolClick: (line: number, column: number) => void
 ): SidebarAPI {
   const sidebar = document.createElement("div");
@@ -81,11 +94,30 @@ export function createSidebar(
     "px-4 py-2 text-xs uppercase tracking-wider text-tau-muted flex items-center justify-between";
   header.textContent = "Explorer";
 
+  const headerActions = document.createElement("div");
+  headerActions.className = "flex items-center gap-1 normal-case tracking-normal";
+
+  const actionButton = (label: string, title: string, run: () => void) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.title = title;
+    button.className = "rounded px-1 text-tau-muted hover:bg-tau-active-hover hover:text-tau-fg";
+    button.addEventListener("click", run);
+    headerActions.appendChild(button);
+  };
+
+  let selectedNode: FileNode | null = null;
+  actionButton("+", "New File", () => callbacks.onCreateFile(selectedNode));
+  actionButton("▣", "New Folder", () => callbacks.onCreateDirectory(selectedNode));
+  actionButton("↻", "Refresh Explorer", callbacks.onRefresh);
   const openButton = document.createElement("button");
-  openButton.textContent = "Open Folder";
+  openButton.textContent = "Open";
+  openButton.title = "Open Folder";
   openButton.className = "text-tau-accent hover:text-tau-accent-hover";
-  openButton.addEventListener("click", onOpenFolder);
-  header.appendChild(openButton);
+  openButton.addEventListener("click", callbacks.onOpenFolder);
+  headerActions.appendChild(openButton);
+  header.appendChild(headerActions);
 
   const tree = document.createElement("div");
   tree.className = "flex-1 px-2 py-1 text-sm overflow-auto min-h-0";
@@ -108,6 +140,29 @@ export function createSidebar(
   // Tracks which directories are expanded so re-rendering the tree (e.g.
   // reopening the same folder) doesn't collapse everything the user had open.
   const expandedPaths = new Set<string>();
+  const rowEls = new Map<string, HTMLElement>();
+
+  function selectNode(node: FileNode) {
+    selectedNode = node;
+    for (const [path, element] of rowEls) {
+      element.classList.toggle("bg-tau-active", path === node.path);
+    }
+  }
+
+  function openNodeMenu(event: MouseEvent, node: FileNode) {
+    event.preventDefault();
+    selectNode(node);
+    showContextMenu(event.clientX, event.clientY, [
+      { label: "New File", run: () => callbacks.onCreateFile(node) },
+      { label: "New Folder", run: () => callbacks.onCreateDirectory(node) },
+      { label: "Rename", run: () => callbacks.onRename(node), separatorBefore: true },
+      { label: "Duplicate", run: () => callbacks.onDuplicate(node) },
+      { label: "Delete", run: () => callbacks.onDelete(node), danger: true },
+      { label: "Copy Path", run: () => callbacks.onCopyPath(node, false), separatorBefore: true },
+      { label: "Copy Relative Path", run: () => callbacks.onCopyPath(node, true) },
+      { label: "Reveal in Finder", run: () => callbacks.onReveal(node) },
+    ]);
+  }
 
   function applyBadge(path: string, badge: HTMLElement) {
     const entry = currentStatus.get(path);
@@ -126,6 +181,8 @@ export function createSidebar(
       "py-1 px-2 hover:bg-tau-active-hover cursor-pointer flex items-center gap-1 whitespace-nowrap overflow-hidden text-ellipsis";
     row.style.paddingLeft = `${depth * 12 + 8}px`;
     row.title = node.path;
+    rowEls.set(node.path, row);
+    row.addEventListener("contextmenu", (event) => openNodeMenu(event, node));
 
     const arrow = document.createElement("span");
     arrow.textContent = "▶";
@@ -180,6 +237,7 @@ export function createSidebar(
     }
 
     row.addEventListener("click", () => {
+      selectNode(node);
       if (expanded) collapse();
       else expand();
     });
@@ -199,6 +257,8 @@ export function createSidebar(
     row.style.paddingLeft = `${depth * 12 + 8}px`;
     row.title = node.path;
     row.innerHTML = "";
+    rowEls.set(node.path, row);
+    row.addEventListener("contextmenu", (event) => openNodeMenu(event, node));
     const icon = document.createElement("span");
     icon.className = "shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full";
     icon.innerHTML = getFileIcon(node.name, false, false);
@@ -220,7 +280,10 @@ export function createSidebar(
       e.dataTransfer?.setData("application/tau-file", data);
     });
     row.addEventListener("dragend", () => clearDrag());
-    row.addEventListener("click", () => onFileClick(node.path, node.name));
+    row.addEventListener("click", () => {
+      selectNode(node);
+      callbacks.onFileClick(node.path, node.name);
+    });
     container.appendChild(row);
   }
 
@@ -239,6 +302,8 @@ export function createSidebar(
   function updateTree(nodes: FileNode[]) {
     tree.innerHTML = "";
     badgeEls.clear();
+    rowEls.clear();
+    selectedNode = null;
     for (const node of nodes) {
       renderNode(node, 0, tree);
     }

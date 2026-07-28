@@ -1,5 +1,5 @@
-use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::Emitter;
+use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
 pub const MENU_OPEN_FOLDER: &str = "menu-open-folder";
 pub const MENU_SAVE: &str = "menu-save";
@@ -134,7 +134,10 @@ pub fn build_menu<R: tauri::Runtime>(
         .build()
 }
 
-pub fn handle_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: tauri::menu::MenuEvent) {
+pub fn handle_menu_event<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    event: tauri::menu::MenuEvent,
+) {
     let id = event.id.0.as_ref();
     match id {
         MENU_OPEN_FOLDER
